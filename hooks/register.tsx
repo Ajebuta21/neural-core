@@ -605,6 +605,11 @@ export const register: Register = on => {
     const num = (n: number) => n.toLocaleString('en-US')
     const money = (n: number | undefined) => (n === undefined ? '--' : `$${n.toFixed(2)}`)
     const hasError = (items: Spark[]) => items.some(x => x.isError)
+    // Opening settings looks for voices again, so one downloaded meanwhile shows.
+    const toggleSettings = async () => {
+      const after = await update($, view, x => ({ ...x, isSettingsOpen: !x.isSettingsOpen }))
+      if (after.isSettingsOpen) void findVoices($)
+    }
     const toggleVoice = () => update($, vitals, x => ({ ...x, isVoiceOff: !x.isVoiceOff, speaking: undefined }))
     const voice = voiceOf(v)
     const voices = v.voices ?? BUILT_IN
@@ -710,7 +715,12 @@ export const register: Register = on => {
               <Text weight="regular" dimColor>{` · ${num(b.total)} ${b.total === 1 ? 'action' : 'actions'}`}</Text>
             </Text>
           </Box>
-          <Text size="footnote" tabular dimColor wrap="truncate">{`Online ${uptime(b.startedAt)}`}</Text>
+          <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+            <Text size="footnote" tabular dimColor wrap="truncate">{`Online ${uptime(b.startedAt)}`}</Text>
+            <Button key="settings" plain dimColor={!vw.isSettingsOpen} label={vw.isSettingsOpen ? 'Close settings' : 'Settings'} onPress={toggleSettings}>
+              <Text size="body">⚙</Text>
+            </Button>
+          </Box>
         </Box>
         {v.speaking && (
           <Text size="footnote" italic dimColor wrap="truncate">{`“${v.speaking.text}”`}</Text>
@@ -718,6 +728,33 @@ export const register: Register = on => {
         {loop && notice('Possible loop', 'error', [`Repeating: ${loop}`, 'No changes between attempts. You may want to step in.'])}
         {!loop && v.waiting && notice('Waiting for your OK', 'warning', [v.waiting.what])}
         {helpers.length > 0 && notice(`${helpers.length} helper${helpers.length === 1 ? '' : 's'} at work`, 'text', helpers.slice(0, 4))}
+        {vw.isSettingsOpen && (
+          <Box flexDirection="column" gap={1} minWidth={0}>
+            {divider}
+            {heading('Settings')}
+            {setting('voice', 'Voice', 'Speaks when Claude needs you or a long task ends', !v.isVoiceOff, toggleVoice)}
+            {Select && (
+              <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Select
+                    key="voice-pick"
+                    options={options}
+                    value={voice}
+                    onSelect={(name: string) => pickVoice(name)}
+                  />
+                </Box>
+                <Button key="voice-play" label="Play sample" onPress={() => sample(voice)} />
+              </Box>
+            )}
+            {Select && !voices.some(x => isPremium(x.name)) && (
+              <Text size="caption" dimColor>
+                For a natural voice, download one in System Settings › Accessibility › Spoken Content › System voice › Manage Voices (pick an English voice marked Premium). It appears here when you next open settings.
+              </Text>
+            )}
+            {setting('sound', 'Sound alerts', 'Chimes for prompts, loops and long tasks', !v.isMuted, toggleSound)}
+            {setting('calm', 'Calm motion', 'Slower, stiller animation', !!v.isCalm, toggleCalm)}
+          </Box>
+        )}
 
         {divider}
         {heading('Usage')}
@@ -725,30 +762,6 @@ export const register: Register = on => {
         {gauge('5-hour limit', fiveHour?.pct, fiveHour?.resetsAt ? untilReset(fiveHour.resetsAt, now) : fiveHour ? '' : 'No reading yet')}
         {gauge('Weekly limit', week?.pct, week?.resetsAt ? untilReset(week.resetsAt, now) : week ? '' : 'No reading yet')}
         {pair('Session cost', money(v.costUsd))}
-
-        {divider}
-        {heading('Settings')}
-        {setting('voice', 'Voice', 'Speaks when Claude needs you or a long task ends', !v.isVoiceOff, toggleVoice)}
-        {Select && (
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Select
-                key="voice-pick"
-                options={options}
-                value={voice}
-                onSelect={(name: string) => pickVoice(name)}
-              />
-            </Box>
-            <Button key="voice-play" label="Play sample" onPress={() => sample(voice)} />
-          </Box>
-        )}
-        {Select && !voices.some(x => isPremium(x.name)) && (
-          <Text size="caption" dimColor>
-            For a natural voice, download one in System Settings › Accessibility › Spoken Content › System voice › Manage Voices (pick an English voice marked Premium). It appears here in your next session.
-          </Text>
-        )}
-        {setting('sound', 'Sound alerts', 'Chimes for prompts, loops and long tasks', !v.isMuted, toggleSound)}
-        {setting('calm', 'Calm motion', 'Slower, stiller animation', !!v.isCalm, toggleCalm)}
 
         {divider}
         {heading(

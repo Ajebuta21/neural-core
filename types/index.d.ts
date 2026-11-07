@@ -18,7 +18,8 @@ export type Spark = {
 }
 // What the stream shows: a filter ('all', 'errors' or a region) and the rows
 // opened to show their detail.
-export type View = { filter: string; expanded: string[] }
+// `isSettingsOpen`: the settings shown, opened from the cog.
+export type View = { filter: string; expanded: string[]; isSettingsOpen?: boolean }
 export type Brain = {
   counts: Record<Region, number>
   feed: Spark[]

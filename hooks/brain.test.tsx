@@ -78,6 +78,8 @@ test('voice, sound and calm switch from their settings', async ($, on) => {
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Button', key: 'voice' })).toBeUndefined()
+  await ui.press({ key: 'settings' })
   const label = async (key: string) => (await ui.find({ type: 'Button', key }))?.props.label
   expect(await label('voice')).toBe('Voice: on')
   expect(await label('sound')).toBe('Sound alerts: on')
@@ -147,6 +149,7 @@ test('a voice can be heard from the panel, then kept', async ($, on) => {
   on('command.register', () => ({ value: { command: 'brain' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'Daniel              en_GB    # Hello\nJamie (Premium)     en_GB    # Hello\nZarvox              en_US    # Hi\n', stderr: '' } }))
   on('audio.speak', (_, e) => {
     said.push({ text: e.text, voice: e.voice })
     return { value: { via: 'system' as const } }
@@ -154,12 +157,15 @@ test('a voice can be heard from the panel, then kept', async ($, on) => {
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'settings' })
+  const picker = await ui.find({ type: 'Select', key: 'voice-pick' })
+  expect((picker?.props.options as { value: string }[]).map(o => o.value)).toEqual(['Jamie (Premium)', 'Daniel'])
   await ui.press({ key: 'voice-play' })
-  expect(said[0]?.voice).toBe('Daniel')
-  await ui.select({ key: 'voice-pick', value: 'Samantha' })
-  expect(said[1]).toEqual({ text: expect.stringMatching(/Samantha/), voice: 'Samantha' })
-  expect((await ui.find({ type: 'Select', key: 'voice-pick' }))?.props.value).toBe('Samantha')
+  expect(said[0]?.voice).toBe('Jamie (Premium)')
+  await ui.select({ key: 'voice-pick', value: 'Daniel' })
+  expect(said[1]).toEqual({ text: expect.stringMatching(/Daniel/), voice: 'Daniel' })
+  expect((await ui.find({ type: 'Select', key: 'voice-pick' }))?.props.value).toBe('Daniel')
   await ui.press({ key: 'voice-play' })
-  expect(said[2]?.voice).toBe('Samantha')
+  expect(said[2]?.voice).toBe('Daniel')
   await ui.unmount()
 })
