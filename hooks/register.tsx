@@ -186,7 +186,27 @@ async function loadHistory($: EngineInterface, own: string) {
     if (typeof day === 'string' && isStale(day, now)) await $.store.delete(key)
     else records.push(record)
   }
-  await update($, history, () => ({ days: aggregate(records) }))
+  const days = aggregate(records)
+  if (JSON.stringify(days) !== JSON.stringify((await read($, history)).days)) await update($, history, () => ({ days }))
+}
+
+// When the stats were last fetched, so a redraw refetches them only when stale.
+const REFRESH_MS = 20000
+let refreshedAt = 0
+
+// Fetch the live readings (memory, limits, cost) and other sessions' history
+// again: the limits are shared with every chat, so a chat you switch back to
+// would otherwise show what they were when it last ran. Writes only changes.
+async function refresh($: EngineInterface) {
+  refreshedAt = Date.now()
+  try {
+    const u = await $.session.usage()
+    await patchVitals($, v => withUsage(v, u))
+  } catch {
+    // No reading yet: the gauges show "--" until the first one.
+  }
+  const key = (await read($, vitals)).sessionKey
+  if (key) await loadHistory($, key).catch(() => undefined)
 }
 
 // Write the vital signs only when they change: every write redraws the panel.
@@ -250,17 +270,18 @@ export const register: Register = on => {
       bootAt: Date.now(),
       sessionKey: v.sessionKey ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     }))
-    await loadHistory($, v0.sessionKey!).catch(() => undefined)
     void $.ui.open({ id: PANE, title: TITLE })
-    try {
-      const u = await $.session.usage()
-      await patchVitals($, v => withUsage(v, u))
-    } catch {
-      // No reading yet: the gauges show "--" until the first one.
-    }
+    if (v0.sessionKey) await refresh($)
 
     return next(e)
   })
+
+  // The app connected to this chat, as when you switch to it: fetch fresh stats.
+  on('session.attach', async ($, e, next) => {
+    void refresh($)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // Fires whenever memory, limits or cost move.
   on('session.measure', async ($, e, next) => {
@@ -427,6 +448,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    if (Date.now() - refreshedAt > REFRESH_MS) void refresh($)
     const b = await read($, brain)
     const v = await read($, vitals)
     const loop = loopIn(b.feed)

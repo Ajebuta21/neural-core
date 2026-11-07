@@ -1,7 +1,8 @@
 import type { Brain, Mode, Region, Vitals } from '../types'
 
 // A holographic brain in amber: a particle mesh in a side-view silhouette,
-// folds, ember hubs with filaments down to a dotted floor, drifting bokeh.
+// folds, ember hubs with filaments down to a dotted floor. No backdrop: it
+// floats on the panel's own background.
 // Every SMIL animation is indefinite with a negative begin, so a redraw lands
 // mid-motion and the scene never looks like it restarted.
 //
@@ -56,12 +57,12 @@ function gauge(x: number, y: number, label: string, pct: number | undefined, sub
   const p = Math.max(0, Math.min(100, pct ?? 0))
   const color = level(p)
   const blink = p >= 90 ? `<animate attributeName="opacity" values="1;.35;1" dur=".9s" repeatCount="indefinite"/>` : ''
-  return `<g transform="translate(${x} ${y})"><circle r="25" fill="#0d0400" fill-opacity=".7" stroke="#4a1e06" stroke-width="4"/><circle r="25" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="${f(p)} 100" transform="rotate(-90)" filter="url(#glow)">${blink}</circle><circle r="31" fill="none" stroke="${AMBER}" stroke-width=".8" stroke-dasharray="2 4" opacity=".6"><animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite"/></circle><text class="g" y="6" text-anchor="middle">${pct === undefined ? '--' : `${Math.round(p)}%`}</text><text class="gl" y="47" text-anchor="middle">${label}</text><text class="gs" y="62" text-anchor="middle">${sub}</text></g>`
+  return `<g transform="translate(${x} ${y})"><circle class="gd" r="25" fill="#0d0400" fill-opacity=".7" stroke="#4a1e06" stroke-width="4"/><circle r="25" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="${f(p)} 100" transform="rotate(-90)" filter="url(#glow)">${blink}</circle><circle r="31" fill="none" stroke="${AMBER}" stroke-width=".8" stroke-dasharray="2 4" opacity=".6"><animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite"/></circle><text class="g" y="6" text-anchor="middle">${pct === undefined ? '--' : `${Math.round(p)}%`}</text><text class="gl" y="47" text-anchor="middle">${label}</text><text class="gs" y="62" text-anchor="middle">${sub}</text></g>`
 }
 
 function banner(text: string, color: string): string {
   const w = text.length * 10.4 + 32
-  return `<g transform="translate(${C.x} 40)"><rect x="${f(-w / 2)}" y="-15" width="${f(w)}" height="28" rx="4" fill="#120400" fill-opacity=".85" stroke="${color}" stroke-width="1"/><text class="bn" y="5" text-anchor="middle" fill="${color}">${text.replace('⚠', '&#9888;')}</text><animate attributeName="opacity" values="1;.45;1" dur="1.1s" repeatCount="indefinite"/></g>`
+  return `<g transform="translate(${C.x} 40)"><rect class="gd" x="${f(-w / 2)}" y="-15" width="${f(w)}" height="28" rx="4" fill="#120400" fill-opacity=".85" stroke="${color}" stroke-width="1"/><text class="bn" y="5" text-anchor="middle" fill="${color}">${text.replace('⚠', '&#9888;')}</text><animate attributeName="opacity" values="1;.45;1" dur="1.1s" repeatCount="indefinite"/></g>`
 }
 
 export const LOBES: { id: Lobe; name: string; what: string; at: P }[] = [
@@ -209,16 +210,6 @@ const GEO = (() => {
     dur: 1.5 + rand() * 3,
     off: rand(),
   }))
-  const bokeh = Array.from({ length: 18 }, () => ({
-    x: rand() * W,
-    y: rand() * H,
-    r: 3 + rand() * 12,
-    deep: rand() < 0.35,
-    o: 0.12 + rand() * 0.3,
-    dx: (rand() - 0.5) * 30,
-    dy: (rand() - 0.5) * 20,
-    dur: 9 + rand() * 12,
-  }))
   const specks = Array.from({ length: 24 }, () => {
     const t = rand()
     return { x: rand() * W, y: 302 + 96 * t ** 1.3, r: 0.8 + t * 1.8, dur: 1.5 + rand() * 3, off: rand() }
@@ -257,7 +248,7 @@ const GEO = (() => {
     ]),
   ) as Record<Lobe, { mesh: string; nodes: string; dust: string }>
 
-  return { outlinePath, pts, dust, specks, edges, folds: folds.join(''), hubs, filaments, runners, twinkles, bokeh, floor, cells, byLobe }
+  return { outlinePath, pts, dust, specks, edges, folds: folds.join(''), hubs, filaments, runners, twinkles, floor, cells, byLobe }
 })()
 
 let CELLS_MARKUP: string | undefined
@@ -279,7 +270,17 @@ ${LOBES.map(l => `.L-${l.id}:hover~.h-${l.id}`).join(',')}{opacity:1;transition:
 .bn{font:700 15px ui-monospace,Menlo,monospace;letter-spacing:2px}
 .say{font:600 14px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:4px;paint-order:stroke}
 .sat{font:700 13px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:3px;paint-order:stroke}
-.tk{font:600 13px ui-monospace,Menlo,monospace;fill:${PALE};opacity:.9}`
+.tk{font:600 13px ui-monospace,Menlo,monospace;fill:${PALE};opacity:.9}
+@media (prefers-color-scheme:light){
+.fs{display:none}
+.du{stroke:#f08a3c}
+.nd{stroke:#c2410c}
+.wt{fill:#c2410c}
+.gd{fill:#fff}
+text{stroke:#fff}
+.lbl,.g,.sat,.say,.bn{fill:#9a3412}
+.sub,.gl,.gs,.gc,.tk{fill:#b45309}
+}`
 
 export function drawBrain(b: Brain, now: number, hud: Hud): string {
   const v = hud.vitals
@@ -296,13 +297,8 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   const begin = (off: number, d: number) => `-${f((off * d) / speed)}s`
   const out: string[] = []
 
-  // Backdrop.
+  // No backdrop: the brain floats on the panel itself. Its floor and glow.
   out.push(
-    `<rect width="${W}" height="${H}" rx="14" fill="url(#bg)"/>`,
-    ...GEO.bokeh.map(
-      k =>
-        `<circle cx="${i0(k.x)}" cy="${i0(k.y)}" r="${i0(k.r * 1.8)}" fill="url(#${k.deep ? 'bd' : 'be'})" opacity="${f(k.o)}">${calm ? '' : `<animateTransform attributeName="transform" type="translate" values="0 0;${f(k.dx)} ${f(k.dy)};0 0" dur="${f(k.dur)}s" repeatCount="indefinite"/>`}</circle>`,
-    ),
     `<ellipse cx="${C.x}" cy="318" rx="190" ry="34" fill="url(#pool)"><animate attributeName="opacity" values=".5;.9;.5" dur="${dur(5)}s" repeatCount="indefinite"/></ellipse>`,
     `<path d="${GEO.floor[0]}" stroke="#b8400a" stroke-width="1" stroke-linecap="round" opacity=".5"/>`,
     `<path d="${GEO.floor[1]}" stroke="#e05510" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>`,
@@ -331,7 +327,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     `<ellipse cx="${CEREBELLUM.x}" cy="${CEREBELLUM.y}" rx="${CEREBELLUM.rx}" ry="${CEREBELLUM.ry}" fill="url(#body)" stroke="${AMBER}" stroke-width=".8" opacity=".75"/>`,
     `<path d="M290 222C296 250 300 280 310 312M312 222C314 250 318 278 326 306" fill="none" stroke="${AMBER}" stroke-width=".8" opacity=".45"/>`,
     `<path d="${GEO.outlinePath}" fill="none" stroke="#ffa64d" stroke-width="1.4" opacity=".9"/>`,
-    `<use href="#folds" stroke="#2a0d00" stroke-width="2.2" opacity=".55" transform="translate(.8 1.2)"/>`,
+    `<use class="fs" href="#folds" stroke="#2a0d00" stroke-width="2.2" opacity=".55" transform="translate(.8 1.2)"/>`,
     `<use href="#folds" stroke="#ff9a40" stroke-width=".9" opacity=".6"/>`,
     `<path d="${GEO.outlinePath}" fill="url(#shade)"/>`,
   )
@@ -341,9 +337,9 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const hot = heat(l.id)
     const { mesh: d, nodes: dots, dust } = GEO.byLobe[l.id]
     out.push(
-      `<path d="${dust}" stroke="${hot > 0.3 ? HOT : '#ffa040'}" stroke-width="1.3" stroke-linecap="round" opacity="${f(0.7 + hot * 0.3)}"/>`,
+      `<path class="du" d="${dust}" stroke="${hot > 0.3 ? HOT : '#ffa040'}" stroke-width="1.3" stroke-linecap="round" opacity="${f(0.7 + hot * 0.3)}"/>`,
       `<defs><path id="m-${l.id}" d="${d}"/></defs><use href="#m-${l.id}" stroke="#ff8a2a" stroke-width=".6" opacity=".65"/>`,
-      `<path d="${dots}" stroke="#ffd29a" stroke-width="1.8" stroke-linecap="round" opacity=".8"/>`,
+      `<path class="nd" d="${dots}" stroke="#ffd29a" stroke-width="1.8" stroke-linecap="round" opacity=".8"/>`,
     )
     if (hot > 0) {
       out.push(
@@ -357,7 +353,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const a = GEO.pts[r.e[0]]!
     const z = GEO.pts[r.e[1]]!
     out.push(
-      `<circle r="1.3" fill="#fff"><animateMotion path="M${i0(a.x)} ${i0(a.y)}L${i0(z.x)} ${i0(z.y)}" dur="${dur(r.dur)}s" begin="${begin(r.off, r.dur)}" repeatCount="indefinite"/></circle>`,
+      `<circle class="wt" r="1.3" fill="#fff"><animateMotion path="M${i0(a.x)} ${i0(a.y)}L${i0(z.x)} ${i0(z.y)}" dur="${dur(r.dur)}s" begin="${begin(r.off, r.dur)}" repeatCount="indefinite"/></circle>`,
     )
   }
 
@@ -365,7 +361,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   for (const t of calm ? [] : GEO.twinkles) {
     const p = GEO.pts[t.i]!
     out.push(
-      `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="1.6" fill="#fff7ea"><animate attributeName="opacity" values="0;1;0" dur="${dur(t.dur)}s" begin="${begin(t.off, t.dur)}" repeatCount="indefinite"/></circle>`,
+      `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="1.6" class="wt" fill="#fff7ea"><animate attributeName="opacity" values="0;1;0" dur="${dur(t.dur)}s" begin="${begin(t.off, t.dur)}" repeatCount="indefinite"/></circle>`,
     )
   }
 
@@ -377,7 +373,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const d = 1.4 + (n % 5) * 0.6
     out.push(
       `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="${i0(8 + hot * 8)}" fill="url(#${hot > 0.3 ? (tone(p.lobe) === RED ? 'br' : 'bh') : 'be'})" opacity="${f(o * 0.8)}"/>`,
-      `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="${f(1.8 + hot * 1.2)}" fill="${HOT}"><animate attributeName="opacity" values="${f(o * 0.4)};${f(o)};${f(o * 0.4)}" dur="${dur(d)}s" begin="${begin((n * 0.37) % 1, d)}" repeatCount="indefinite"/></circle>`,
+      `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="${f(1.8 + hot * 1.2)}" class="wt" fill="${HOT}"><animate attributeName="opacity" values="${f(o * 0.4)};${f(o)};${f(o * 0.4)}" dur="${dur(d)}s" begin="${begin((n * 0.37) % 1, d)}" repeatCount="indefinite"/></circle>`,
     )
   })
 
@@ -393,9 +389,6 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
         `<circle cx="${C.x}" cy="${C.y}" r="230" fill="none" stroke="${HOT}" stroke-width="2.5" opacity="0" filter="url(#glow)"><animate attributeName="r" values="230;6" dur="1.3s" begin="${k}s" repeatCount="2" fill="freeze"/><animate attributeName="opacity" values="0;.9;0" dur="1.3s" begin="${k}s" repeatCount="2" fill="freeze"/></circle>`,
       )
     }
-    out.push(
-      `<rect width="${W}" height="${H}" fill="${HOT}" opacity="0"><animate attributeName="opacity" values="0;.22;0" dur="1.3s" repeatCount="2" fill="freeze"/></rect>`,
-    )
   }
 
   // The firing: a shockwave from the lobe that just acted.
@@ -430,7 +423,6 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   // Alarms: a loop washes the scene red; a waiting prompt sends out a beacon.
   if (hud.loop) {
     out.push(
-      `<rect width="${W}" height="${H}" fill="${RED}" opacity="0"><animate attributeName="opacity" values="0;.14;0" dur="1.2s" repeatCount="indefinite"/></rect>`,
       `<path d="${GEO.outlinePath}" fill="none" stroke="${RED}" stroke-width="2.5" filter="url(#glow)"><animate attributeName="opacity" values=".3;1;.3" dur="1.2s" repeatCount="indefinite"/></path>`,
       banner('⚠ LOOP DETECTED', RED),
     )
@@ -463,7 +455,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const above = lobe.at.y < C.y
     const y = lobe.at.y + (above ? -30 : 34)
     out.push(
-      `<g opacity="0"><text class="lbl" x="${lobe.at.x}" y="${y}" text-anchor="middle" style="fill:${step.isError ? RED : HOT}">${lobe.name}</text><text class="sub" x="${lobe.at.x}" y="${y + 17}" text-anchor="middle">${esc(clip(`${step.verb} ${step.detail}`.trim(), 26))}</text><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.08;.75;1" dur="4s" begin="-${f((now - step.at) / 1000)}s" fill="freeze"/></g>`,
+      `<g opacity="0"><text class="lbl" x="${lobe.at.x}" y="${y}" text-anchor="middle"${step.isError ? ` style="fill:${RED}"` : ''}>${lobe.name}</text><text class="sub" x="${lobe.at.x}" y="${y + 17}" text-anchor="middle">${esc(clip(`${step.verb} ${step.detail}`.trim(), 26))}</text><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.08;.75;1" dur="4s" begin="-${f((now - step.at) / 1000)}s" fill="freeze"/></g>`,
     )
   }
 
@@ -478,18 +470,14 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
       const peak = 6 + ((k * 7) % 11) * 2.2 * (1 - Math.abs(k - 7) / 9)
       const d = 0.45 + ((k * 5) % 7) * 0.08
       out.push(
-        `<rect x="${x - 2}" y="${300 - peak / 2}" width="4" height="${f(peak)}" rx="2" fill="${HOT}" filter="url(#glow)"><animate attributeName="height" values="2;${f(peak)};4;${f(peak * 0.7)};2" dur="${f(d)}s" repeatCount="indefinite"/><animate attributeName="y" values="299;${f(300 - peak / 2)};298;${f(300 - peak * 0.35)};299" dur="${f(d)}s" repeatCount="indefinite"/></rect>`,
+        `<rect class="wt" x="${x - 2}" y="${300 - peak / 2}" width="4" height="${f(peak)}" rx="2" fill="${HOT}" filter="url(#glow)"><animate attributeName="height" values="2;${f(peak)};4;${f(peak * 0.7)};2" dur="${f(d)}s" repeatCount="indefinite"/><animate attributeName="y" values="299;${f(300 - peak / 2)};298;${f(300 - peak * 0.35)};299" dur="${f(d)}s" repeatCount="indefinite"/></rect>`,
       )
     }
     out.push(`<text class="say" x="${C.x}" y="350" text-anchor="middle">${esc(clip(hud.speaking, 30))}</text>`)
   }
 
-  // HUD frame: corner brackets, edge rulers, and a ticker of recent actions.
-  const ticks = (x: number, dir: number) =>
-    Array.from({ length: 25 }, (_, i) => `M${x} ${70 + i * 10}h${dir * (i % 5 === 0 ? 7 : 3)}`).join('')
+  // A ticker of recent actions along the top.
   out.push(
-    `<path d="M6 22V6H22M458 6H474V22M6 378V394H22M458 394H474V378" fill="none" stroke="${AMBER}" stroke-width="1.4" opacity=".85"/>`,
-    `<path d="${ticks(6, 1)}${ticks(474, -1)}" stroke="${AMBER}" stroke-width=".8" opacity=".5"/>`,
     `<path d="M28 25H452" stroke="${AMBER}" stroke-width=".6" opacity=".4"/>`,
   )
   const recentSteps = b.feed.filter(s => s.region !== 'core').slice(-8).reverse()
@@ -540,11 +528,9 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * 3}" height="${H * 3}">
 <style>${CSS}</style>
 <defs>
-<radialGradient id="bg" cx=".5" cy=".42" r=".75"><stop offset="0" stop-color="#2a0d00"/><stop offset=".55" stop-color="#110400"/><stop offset="1" stop-color="#030100"/></radialGradient>
 <radialGradient id="body" cx=".45" cy=".4" r=".7"><stop offset="0" stop-color="#ff7a10" stop-opacity=".2"/><stop offset=".7" stop-color="#ff5a00" stop-opacity=".07"/><stop offset="1" stop-color="#ff5a00" stop-opacity=".02"/></radialGradient>
 <radialGradient id="pool"><stop offset="0" stop-color="#e0660f" stop-opacity=".45"/><stop offset="1" stop-color="#e0660f" stop-opacity="0"/></radialGradient>
 <radialGradient id="be"><stop offset="0" stop-color="${EMBER}"/><stop offset="1" stop-color="${EMBER}" stop-opacity="0"/></radialGradient>
-<radialGradient id="bd"><stop offset="0" stop-color="#e03a00"/><stop offset="1" stop-color="#e03a00" stop-opacity="0"/></radialGradient>
 <radialGradient id="bh"><stop offset="0" stop-color="${HOT}"/><stop offset="1" stop-color="${HOT}" stop-opacity="0"/></radialGradient>
 <radialGradient id="br"><stop offset="0" stop-color="${RED}"/><stop offset="1" stop-color="${RED}" stop-opacity="0"/></radialGradient>
 <radialGradient id="cur"><stop offset="0" stop-color="#ffd08a" stop-opacity=".55"/><stop offset=".45" stop-color="#ff9a3c" stop-opacity=".18"/><stop offset="1" stop-color="#ff9a3c" stop-opacity="0"/></radialGradient>

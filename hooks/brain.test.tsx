@@ -116,3 +116,24 @@ test('the brain says when a task is done, and shows what it says', async ($, on)
   finish()
   await ui.unmount()
 })
+
+test('switching back to a chat fetches fresh stats', async ($, on) => {
+  let pct = 40
+  on('command.register', () => ({ value: { command: 'brain' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.attach', (_, e) => ({ clientId: e.clientId }))
+  on('session.usage', () => ({
+    value: { context: { tokens: pct * 1000, window: 100000, percent: pct }, rateLimits: [{ kind: 'five_hour', percentUsed: pct + 10 }] },
+  }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /40% used/ })).toBeDefined()
+
+  pct = 75
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  expect(await ui.find({ type: 'Text', text: /75% used/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /85% used/ })).toBeDefined()
+  await ui.unmount()
+})
