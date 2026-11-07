@@ -20,14 +20,14 @@ A sci-fi holographic brain that lives beside your Claude Code chat and shows wha
 - **Thought stream.**
   - Every step in plain English ("Edited register.tsx", "Ran npm test"), grouped by task.
   - Repeats folded together ("Read 5 files").
-  - Filter chips, and rows you can click open for full detail.
+  - A filter dropdown, and rows you can click open for full detail.
   - A summary card at the end of each task.
 - **History.** A 14-day chart plus today's, this week's and all-time totals, saved across sessions.
 - **Interactive.**
   - A glow follows your mouse.
   - Hover over a lobe to see what it does.
   - Click a lobe to fire it.
-  - A 🌙 Calm button slows the motion, and a 🔔 button mutes the sounds.
+  - A Calm button slows the motion, and a Sound button mutes the alerts.
 
 It never calls the model, so it uses no extra tokens. Everything it reads stays on your machine.
 

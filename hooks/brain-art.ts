@@ -241,8 +241,25 @@ const GEO = (() => {
     }
   }
 
-  return { outlinePath, pts, dust, specks, edges, folds: folds.join(''), hubs, filaments, runners, twinkles, bokeh, floor, cells }
+  // Each lobe's mesh, nodes and dust as path data, built once: they never move.
+  const byLobe = Object.fromEntries(
+    LOBES.map(l => [
+      l.id,
+      {
+        mesh: edges
+          .filter(([i]) => pts[i]!.lobe === l.id)
+          .map(([i, j]) => `M${i0(pts[i]!.x)} ${i0(pts[i]!.y)}L${i0(pts[j]!.x)} ${i0(pts[j]!.y)}`)
+          .join(''),
+        nodes: pts.filter(q => q.lobe === l.id).map(q => `M${i0(q.x)} ${i0(q.y)}h.01`).join(''),
+        dust: dust.filter(q => q.lobe === l.id).map(q => `M${i0(q.x)} ${i0(q.y)}h.01`).join(''),
+      },
+    ]),
+  ) as Record<Lobe, { mesh: string; nodes: string; dust: string }>
+
+  return { outlinePath, pts, dust, specks, edges, folds: folds.join(''), hubs, filaments, runners, twinkles, bokeh, floor, cells, byLobe }
 })()
+
+let CELLS_MARKUP: string | undefined
 
 const CSS = `.v{pointer-events:none}
 .c{cursor:crosshair}
@@ -279,7 +296,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
 
   // Backdrop.
   out.push(
-    `<rect width="${W}" height="${H}" fill="url(#bg)"/>`,
+    `<rect width="${W}" height="${H}" rx="14" fill="url(#bg)"/>`,
     ...GEO.bokeh.map(
       k =>
         `<circle cx="${f(k.x)}" cy="${f(k.y)}" r="${f(k.r)}" fill="${k.deep ? '#e03a00' : EMBER}" opacity="${f(k.o)}" filter="url(#soft)">${calm ? '' : `<animateTransform attributeName="transform" type="translate" values="0 0;${f(k.dx)} ${f(k.dy)};0 0" dur="${f(k.dur)}s" repeatCount="indefinite"/>`}</circle>`,
@@ -320,12 +337,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   // Dust and mesh, one path per lobe so a busy lobe can burn white-hot.
   for (const l of LOBES) {
     const hot = heat(l.id)
-    const d = GEO.edges
-      .filter(([i]) => GEO.pts[i]!.lobe === l.id)
-      .map(([i, j]) => `M${i0(GEO.pts[i]!.x)} ${i0(GEO.pts[i]!.y)}L${i0(GEO.pts[j]!.x)} ${i0(GEO.pts[j]!.y)}`)
-      .join('')
-    const dots = GEO.pts.filter(p => p.lobe === l.id).map(p => `M${i0(p.x)} ${i0(p.y)}h.01`).join('')
-    const dust = GEO.dust.filter(p => p.lobe === l.id).map(p => `M${i0(p.x)} ${i0(p.y)}h.01`).join('')
+    const { mesh: d, nodes: dots, dust } = GEO.byLobe[l.id]
     out.push(
       `<path d="${dust}" stroke="${hot > 0.3 ? HOT : '#ffa040'}" stroke-width="1.3" stroke-linecap="round" opacity="${f(0.7 + hot * 0.3)}"/>`,
       `<defs><path id="m-${l.id}" d="${d}"/></defs><use href="#m-${l.id}" stroke="#ff8a2a" stroke-width=".6" opacity=".65"/>`,
@@ -486,10 +498,10 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   )
 
   // The pointer grid, then each lobe's highlight, which its cells reach by `~`.
-  const cells = GEO.cells.map(
+  const cells = CELLS_MARKUP ?? (CELLS_MARKUP = GEO.cells.map(
     c =>
       `<g class="c${c.lobe ? ` L-${c.lobe}` : ''}" id="c${c.n}"><rect x="${c.x}" y="${c.y}"/><circle cx="${c.x + CELL / 2}" cy="${c.y + CELL / 2}"/></g>`,
-  )
+  ).join(''))
   const highlights = LOBES.map(l => {
     const above = l.at.y < C.y
     const y = l.at.y + (above ? -30 : 34)
@@ -526,7 +538,7 @@ ${bootMask}
 ${out.join('\n')}
 </g>
 ${bootOverlay}
-${cells.join('')}
+${cells}
 ${highlights.join('')}
 </svg>`
 }

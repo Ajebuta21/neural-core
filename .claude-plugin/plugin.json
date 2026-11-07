@@ -1,6 +1,6 @@
 {
   "name": "neural-core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A sci-fi holographic brain beside the chat: watch what Claude does live, track memory, limits and cost, catch loops, and see your history.",
   "types": "./types/index.d.ts",
   "author": {

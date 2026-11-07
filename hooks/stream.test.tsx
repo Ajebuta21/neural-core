@@ -43,7 +43,7 @@ test('a summary counts steps, changed files and errors since the task began', as
   expect(summarize(feed)).toEqual({ steps: 4, files: ['x.ts', 'y.ts'], errors: 1 })
 })
 
-test('filter chips and row expanding work in the panel', async ($, on) => {
+test('the filter dropdown and row expanding work in the panel', async ($, on) => {
   on('command.register', () => ({ value: { command: 'brain' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', () => ({ value: undefined }))
@@ -60,12 +60,11 @@ test('filter chips and row expanding work in the panel', async ($, on) => {
 
   const rows = await ui.find({ type: 'Text', text: /npm run build/ })
   expect(rows).toBeDefined()
-  await ui.press({ key: 'f-see' })
-  expect(await ui.find({ type: 'Text', text: /SEE only/ })).toBeDefined()
+  await ui.select({ key: 'filter', value: 'see' })
   expect(await ui.find({ type: 'Text', text: /npm run build/ })).toBeUndefined()
 
-  await ui.press({ key: 'f-all' })
-  const row = await ui.find({ type: 'Button', text: /Read 2 files/ })
+  await ui.select({ key: 'filter', value: 'all' })
+  const row = await ui.find({ type: 'Button', text: /▸ SEE/ })
   expect(row?.key).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\/p\/b\.ts|b\.ts/ })).toBeDefined()
   await ui.press({ key: row!.key! })
