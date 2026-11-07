@@ -1,0 +1,5 @@
+{
+  "name": "neural-core",
+  "owner": { "name": "Ajebuta21" },
+  "plugins": [{ "name": "neural-core", "source": "./" }]
+}
