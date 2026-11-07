@@ -50,6 +50,10 @@ export type Vitals = {
   isVoiceOff?: boolean
   // The system voice the brain speaks with, by name; absent, the default (VOICES[0]).
   voice?: string
+  // No welcome-back greeting when on.
+  isGreetingOff?: boolean
+  // When the app last left this chat, for the welcome back on return.
+  leftAt?: number
   // The good English voices this Mac has, found at start: Daniel, Samantha and
   // any Enhanced or Premium voice downloaded in System Settings.
   voices?: { name: string; what: string }[]

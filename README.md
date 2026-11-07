@@ -21,6 +21,7 @@ The brain is the only thing in amber, and it floats on the panel with no backdro
   - "Task finished in 3 minutes." when a task that took over a minute ends.
 
   It never repeats a line within a minute or talks over itself.
+- **Welcome back.** When you open a chat or the app after 20 minutes or more away, the brain greets you and says where you stopped: "Good evening. Welcome back. Last time, about 3 hours ago, you were working on: fix the login bug. Claude finished it, with 2 files changed." It also shows as a pop-up, and has its own switch in settings.
 - **Alerts.** A toast and a chime for the same moments, so you notice even with the voice off.
 - **Loop detector.** If Claude repeats the same action without making changes, or fails three times in a row, the scene pulses red and tells you what's repeating.
 - **Thought stream.**

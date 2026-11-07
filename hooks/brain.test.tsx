@@ -169,3 +169,29 @@ test('a voice can be heard from the panel, then kept', async ($, on) => {
   expect(said[2]?.voice).toBe('Daniel')
   await ui.unmount()
 })
+
+test('after a while away, a new chat greets you with where you stopped', async ($, on) => {
+  const said: string[] = []
+  const toasts: string[] = []
+  on('command.register', () => ({ value: { command: 'brain' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('audio.speak', (_, e) => {
+    said.push(e.text)
+    return { value: { via: 'system' as const } }
+  })
+  on('store.keys', () => ({ value: [] }))
+  on('store.get', (_, e) => ({
+    value: e.key === 'last-task' ? { text: 'Fix the refresh token bug in the login flow', at: Date.now() - 3 * 3600000, isDone: true, files: 2, errors: 0 } : undefined,
+  }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(said[0]).toMatch(/Welcome back\. Last time, about 3 hours ago, you were working on: Fix the refresh token bug in the login flow\. Claude finished it, with 2 files changed\.$/)
+  expect(toasts[0]).toBe(said[0])
+  await ui.unmount()
+})

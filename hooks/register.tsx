@@ -305,6 +305,65 @@ function short(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 1) + '…' : text
 }
 
+// The latest task in any chat, kept in the store so a new chat can say where
+// you stopped.
+type LastTask = { text: string; at: number; isDone: boolean; files: number; errors: number }
+const LAST_KEY = 'last-task'
+// Away this long, the brain greets you when you come back.
+const AWAY_MS = 20 * 60000
+
+function ago(ms: number): string {
+  const m = Math.round(ms / 60000)
+  if (m < 60) return `${m} minutes ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return h === 1 ? 'about an hour ago' : `about ${h} hours ago`
+  const d = Math.round(h / 24)
+  return d === 1 ? 'yesterday' : `${d} days ago`
+}
+
+// "Good evening. Welcome back. Last time, about 3 hours ago, you were working
+// on: fix the login bug. Claude finished it, with 2 files changed."
+function greeting(t: LastTask | undefined, isWaiting: boolean, now: number): string {
+  const hour = new Date(now).getHours()
+  const hello = `${hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'}. Welcome back.`
+  if (!t || !t.text) return hello
+  const words = t.text.replace(/https?:\/\/\S+/g, 'a link').replace(/[`*_#>]/g, '').split(/\s+/).filter(Boolean)
+  const what = words.slice(0, 14).join(' ') + (words.length > 14 ? '…' : '')
+  const outcome = isWaiting
+    ? 'Claude is waiting for your approval.'
+    : !t.isDone
+      ? 'It was still in progress.'
+      : t.errors > 0
+        ? `It ended with ${t.errors} error${t.errors === 1 ? '' : 's'}.`
+        : t.files > 0
+          ? `Claude finished it, with ${t.files} file${t.files === 1 ? '' : 's'} changed.`
+          : 'Claude finished it.'
+  return `${hello} Last time, ${ago(now - t.at)}, you were working on: ${what.replace(/[.!?]+$/, '')}. ${outcome}`
+}
+
+// Greet aloud, and as a toast so it reads with the voice off too.
+async function greet($: EngineInterface, t: LastTask | undefined) {
+  const v = await read($, vitals)
+  if (v.isGreetingOff) return
+  const words = greeting(t, !!v.waiting, Date.now())
+  try {
+    $.ui.toast(words, { timeoutMs: 10000 })
+  } catch {
+    // A surface with no toasts: the voice still says it.
+  }
+  await announce($, undefined, words, true)
+}
+
+// This chat's own latest task, from its feed.
+function lastTaskIn(b: Brain): LastTask | undefined {
+  const i = b.feed.map(isTask).lastIndexOf(true)
+  if (i < 0) return undefined
+  const after = b.feed.slice(i + 1)
+  const sum = after.find(s => s.kind === 'summary')?.summary
+  const last = b.feed[b.feed.length - 1]!
+  return { text: b.feed[i]!.detail, at: last.at, isDone: b.mode === 'idle', files: sum?.files.length ?? 0, errors: sum?.errors ?? 0 }
+}
+
 function uptime(since: number): string {
   const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
   const m = Math.floor(s / 60)
@@ -322,13 +381,31 @@ export const register: Register = on => {
     void $.ui.open({ id: PANE, title: TITLE })
     void findVoices($)
     if (v0.sessionKey) await refresh($)
+    // A new chat after a while away: say where you stopped, in whichever chat.
+    const last = (await $.store.get(LAST_KEY).catch(() => undefined)) as LastTask | undefined
+    const own = lastTaskIn(await read($, brain))
+    const since = Math.max(last?.at ?? 0, own?.at ?? 0)
+    if (since > 0 && Date.now() - since >= AWAY_MS) void greet($, own ?? last)
 
     return next(e)
   })
 
-  // The app connected to this chat, as when you switch to it: fetch fresh stats.
+  // The app connected to this chat, as when you switch to it or open the app:
+  // fetch fresh stats, and after a while away, greet you with where you stopped.
   on('session.attach', async ($, e, next) => {
     void refresh($)
+    const v = await read($, vitals)
+    const b = await read($, brain)
+    const own = lastTaskIn(b)
+    const since = Math.max(v.leftAt ?? 0, own?.at ?? 0)
+    if (v.leftAt !== undefined) await patchVitals($, x => ({ ...x, leftAt: undefined }))
+    if (since > 0 && Date.now() - since >= AWAY_MS) void greet($, own)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('session.detach', async ($, e, next) => {
+    await patchVitals($, x => ({ ...x, leftAt: Date.now() }))
 
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -402,6 +479,8 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     const text = typeof e.text === 'string' ? e.text : ''
+    const task: LastTask = { text: oneLine(text, 200), at: Date.now(), isDone: false, files: 0, errors: 0 }
+    await $.store.set(LAST_KEY, task).catch(() => undefined)
     await update($, vitals, v => ({ ...v, turnStartedAt: Date.now(), waiting: undefined, loopWarned: undefined }))
     await update($, brain, b => {
       const spark: Spark = {
@@ -483,6 +562,11 @@ export const register: Register = on => {
     if (summary && ms >= LONG_TASK_MS) {
       const errors = summary.errors > 0 ? `, with ${summary.errors} error${summary.errors === 1 ? '' : 's'}` : ''
       void announce($, 'done', `Task finished in ${spoken(ms)}${errors}.`)
+    }
+    const last = (await $.store.get(LAST_KEY).catch(() => undefined)) as LastTask | undefined
+    if (last) {
+      const task: LastTask = { ...last, at: ended, isDone: true, files: summary?.files.length ?? 0, errors: summary?.errors ?? 0 }
+      await $.store.set(LAST_KEY, task).catch(() => undefined)
     }
     await saveTotals($)
 
@@ -610,6 +694,7 @@ export const register: Register = on => {
       const after = await update($, view, x => ({ ...x, isSettingsOpen: !x.isSettingsOpen }))
       if (after.isSettingsOpen) void findVoices($)
     }
+    const toggleGreeting = () => update($, vitals, x => ({ ...x, isGreetingOff: !x.isGreetingOff }))
     const toggleVoice = () => update($, vitals, x => ({ ...x, isVoiceOff: !x.isVoiceOff, speaking: undefined }))
     const voice = voiceOf(v)
     const voices = v.voices ?? BUILT_IN
@@ -751,6 +836,7 @@ export const register: Register = on => {
                 For a natural voice, download one in System Settings › Accessibility › Spoken Content › System voice › Manage Voices (pick an English voice marked Premium). It appears here when you next open settings.
               </Text>
             )}
+            {setting('greeting', 'Welcome back', 'Says where you stopped after 20 minutes away', !v.isGreetingOff, toggleGreeting)}
             {setting('sound', 'Sound alerts', 'Chimes for prompts, loops and long tasks', !v.isMuted, toggleSound)}
             {setting('calm', 'Calm motion', 'Slower, stiller animation', !!v.isCalm, toggleCalm)}
           </Box>
