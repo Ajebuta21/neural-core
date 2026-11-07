@@ -45,6 +45,9 @@ export type Vitals = {
   isMuted: boolean
   // Calm mode: slower, stiller motion.
   isCalm?: boolean
+  // The spoken updates, on unless switched off, and the line being spoken now.
+  isVoiceOff?: boolean
+  speaking?: { text: string; at: number }
   // When the panel last opened, for the boot sequence.
   bootAt?: number
   // This session's key in the cross-session store, and its time spent working.

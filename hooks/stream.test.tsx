@@ -64,10 +64,11 @@ test('the filter dropdown and row expanding work in the panel', async ($, on) =>
   expect(await ui.find({ type: 'Text', text: /npm run build/ })).toBeUndefined()
 
   await ui.select({ key: 'filter', value: 'all' })
-  const row = await ui.find({ type: 'Button', text: /▸ SEE/ })
+  const row = await ui.find({ type: 'Button', text: /›/ })
   expect(row?.key).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\/p\/b\.ts|b\.ts/ })).toBeDefined()
   await ui.press({ key: row!.key! })
-  expect(await ui.find({ type: 'Text', text: /▾/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /⌄/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Exec$/ })).toBeDefined()
   await ui.unmount()
 })

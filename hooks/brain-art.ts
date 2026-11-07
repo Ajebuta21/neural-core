@@ -29,8 +29,9 @@ const WARN = '#ffd23f'
 // is under way (the repeated action, in words).
 // `calm` slows and stills the motion; `bootAge` is how long ago the panel
 // opened, so the boot sequence plays once and a redraw mid-boot continues it;
-// `helpers` names the helper agents working now.
-export type Hud = { vitals: Vitals; loop?: string; calm?: boolean; bootAge?: number; helpers?: string[] }
+// `helpers` names the helper agents working now; `speaking` is the line the
+// brain is saying aloud, shown as a waveform and caption.
+export type Hud = { vitals: Vitals; loop?: string; calm?: boolean; bootAge?: number; helpers?: string[]; speaking?: string }
 
 const BOOT_MS = 3200
 
@@ -55,12 +56,12 @@ function gauge(x: number, y: number, label: string, pct: number | undefined, sub
   const p = Math.max(0, Math.min(100, pct ?? 0))
   const color = level(p)
   const blink = p >= 90 ? `<animate attributeName="opacity" values="1;.35;1" dur=".9s" repeatCount="indefinite"/>` : ''
-  return `<g transform="translate(${x} ${y})"><circle r="25" fill="#0d0400" fill-opacity=".7" stroke="#4a1e06" stroke-width="4"/><circle r="25" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="${f(p)} 100" transform="rotate(-90)" filter="url(#glow)">${blink}</circle><circle r="31" fill="none" stroke="${AMBER}" stroke-width=".8" stroke-dasharray="2 4" opacity=".6"><animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite"/></circle><text class="g" y="4.5" text-anchor="middle">${pct === undefined ? '--' : `${Math.round(p)}%`}</text><text class="gl" y="45" text-anchor="middle">${label}</text><text class="gs" y="56" text-anchor="middle">${sub}</text></g>`
+  return `<g transform="translate(${x} ${y})"><circle r="25" fill="#0d0400" fill-opacity=".7" stroke="#4a1e06" stroke-width="4"/><circle r="25" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="${f(p)} 100" transform="rotate(-90)" filter="url(#glow)">${blink}</circle><circle r="31" fill="none" stroke="${AMBER}" stroke-width=".8" stroke-dasharray="2 4" opacity=".6"><animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite"/></circle><text class="g" y="6" text-anchor="middle">${pct === undefined ? '--' : `${Math.round(p)}%`}</text><text class="gl" y="47" text-anchor="middle">${label}</text><text class="gs" y="62" text-anchor="middle">${sub}</text></g>`
 }
 
 function banner(text: string, color: string): string {
-  const w = text.length * 7.6 + 28
-  return `<g transform="translate(${C.x} 40)"><rect x="${f(-w / 2)}" y="-12" width="${f(w)}" height="22" rx="3" fill="#120400" fill-opacity=".85" stroke="${color}" stroke-width="1"/><text class="bn" y="3.5" text-anchor="middle" fill="${color}">${text.replace('⚠', '&#9888;')}</text><animate attributeName="opacity" values="1;.45;1" dur="1.1s" repeatCount="indefinite"/></g>`
+  const w = text.length * 10.4 + 32
+  return `<g transform="translate(${C.x} 40)"><rect x="${f(-w / 2)}" y="-15" width="${f(w)}" height="28" rx="4" fill="#120400" fill-opacity=".85" stroke="${color}" stroke-width="1"/><text class="bn" y="5" text-anchor="middle" fill="${color}">${text.replace('⚠', '&#9888;')}</text><animate attributeName="opacity" values="1;.45;1" dur="1.1s" repeatCount="indefinite"/></g>`
 }
 
 export const LOBES: { id: Lobe; name: string; what: string; at: P }[] = [
@@ -269,15 +270,16 @@ const CSS = `.v{pointer-events:none}
 .c:active circle{r:72px;transition:r .08s}
 .hl{opacity:0;pointer-events:none;transition:opacity .5s}
 ${LOBES.map(l => `.L-${l.id}:hover~.h-${l.id}`).join(',')}{opacity:1;transition:opacity .15s}
-.lbl{font:600 11px ui-monospace,Menlo,monospace;letter-spacing:1.5px;fill:${HOT};stroke:#1a0700;stroke-width:3px;paint-order:stroke}
-.sub{font:10px ui-monospace,Menlo,monospace;fill:${PALE};stroke:#1a0700;stroke-width:3px;paint-order:stroke}
-.g{font:700 13px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:3px;paint-order:stroke}
-.gl{font:600 9px ui-monospace,Menlo,monospace;letter-spacing:1.5px;fill:${PALE};stroke:#120400;stroke-width:3px;paint-order:stroke}
-.gs{font:9px ui-monospace,Menlo,monospace;fill:#d0935a;stroke:#120400;stroke-width:3px;paint-order:stroke}
-.gc{font:600 11px ui-monospace,Menlo,monospace;letter-spacing:1px;fill:${PALE};stroke:#120400;stroke-width:3px;paint-order:stroke}
-.bn{font:700 11px ui-monospace,Menlo,monospace;letter-spacing:2px}
-.sat{font:600 9px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:3px;paint-order:stroke}
-.tk{font:9px ui-monospace,Menlo,monospace;fill:${PALE};opacity:.85}`
+.lbl{font:700 16px ui-monospace,Menlo,monospace;letter-spacing:1.5px;fill:${HOT};stroke:#1a0700;stroke-width:3px;paint-order:stroke}
+.sub{font:600 14px ui-monospace,Menlo,monospace;fill:${PALE};stroke:#1a0700;stroke-width:4px;paint-order:stroke}
+.g{font:700 17px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:3px;paint-order:stroke}
+.gl{font:700 13px ui-monospace,Menlo,monospace;letter-spacing:1px;fill:${PALE};stroke:#120400;stroke-width:3px;paint-order:stroke}
+.gs{font:600 12px ui-monospace,Menlo,monospace;fill:#e0a468;stroke:#120400;stroke-width:3px;paint-order:stroke}
+.gc{font:700 15px ui-monospace,Menlo,monospace;letter-spacing:1px;fill:${PALE};stroke:#120400;stroke-width:3px;paint-order:stroke}
+.bn{font:700 15px ui-monospace,Menlo,monospace;letter-spacing:2px}
+.say{font:600 14px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:4px;paint-order:stroke}
+.sat{font:700 13px ui-monospace,Menlo,monospace;fill:${HOT};stroke:#120400;stroke-width:3px;paint-order:stroke}
+.tk{font:600 13px ui-monospace,Menlo,monospace;fill:${PALE};opacity:.9}`
 
 export function drawBrain(b: Brain, now: number, hud: Hud): string {
   const v = hud.vitals
@@ -299,7 +301,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     `<rect width="${W}" height="${H}" rx="14" fill="url(#bg)"/>`,
     ...GEO.bokeh.map(
       k =>
-        `<circle cx="${f(k.x)}" cy="${f(k.y)}" r="${f(k.r)}" fill="${k.deep ? '#e03a00' : EMBER}" opacity="${f(k.o)}" filter="url(#soft)">${calm ? '' : `<animateTransform attributeName="transform" type="translate" values="0 0;${f(k.dx)} ${f(k.dy)};0 0" dur="${f(k.dur)}s" repeatCount="indefinite"/>`}</circle>`,
+        `<circle cx="${i0(k.x)}" cy="${i0(k.y)}" r="${i0(k.r * 1.8)}" fill="url(#${k.deep ? 'bd' : 'be'})" opacity="${f(k.o)}">${calm ? '' : `<animateTransform attributeName="transform" type="translate" values="0 0;${f(k.dx)} ${f(k.dy)};0 0" dur="${f(k.dur)}s" repeatCount="indefinite"/>`}</circle>`,
     ),
     `<ellipse cx="${C.x}" cy="318" rx="190" ry="34" fill="url(#pool)"><animate attributeName="opacity" values=".5;.9;.5" dur="${dur(5)}s" repeatCount="indefinite"/></ellipse>`,
     `<path d="${GEO.floor[0]}" stroke="#b8400a" stroke-width="1" stroke-linecap="round" opacity=".5"/>`,
@@ -307,7 +309,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     `<path d="${GEO.floor[2]}" stroke="#ff6a14" stroke-width="2.1" stroke-linecap="round" opacity=".6"/>`,
     ...GEO.specks.map(
       k =>
-        `<circle cx="${f(k.x)}" cy="${f(k.y)}" r="${f(k.r)}" fill="${EMBER}" filter="url(#glow)"><animate attributeName="opacity" values=".2;1;.2" dur="${dur(k.dur)}s" begin="${begin(k.off, k.dur)}" repeatCount="indefinite"/></circle>`,
+        `<circle cx="${i0(k.x)}" cy="${i0(k.y)}" r="${f(k.r)}" fill="${EMBER}"><animate attributeName="opacity" values=".2;1;.2" dur="${dur(k.dur)}s" begin="${begin(k.off, k.dur)}" repeatCount="indefinite"/></circle>`,
     ),
   )
 
@@ -317,8 +319,8 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const hot = heat(lobe)
     out.push(
       `<path d="${fl.d}" fill="none" stroke="${hot > 0.3 ? tone(lobe) : AMBER}" stroke-width=".7" opacity="${f(0.25 + hot * 0.5)}"/>`,
-      `<circle cx="${f(fl.g.x)}" cy="${f(fl.g.y)}" r="2" fill="${EMBER}" filter="url(#glow)" opacity=".85"/>`,
-      calm ? '' : `<circle r="1.8" fill="${HOT}" filter="url(#glow)"><animateMotion path="${fl.d}" dur="${dur(fl.dur)}s" begin="${begin(fl.off, fl.dur)}" repeatCount="indefinite"/><animate attributeName="opacity" values="0;1;1;0" dur="${dur(fl.dur)}s" begin="${begin(fl.off, fl.dur)}" repeatCount="indefinite"/></circle>`,
+      `<circle cx="${i0(fl.g.x)}" cy="${i0(fl.g.y)}" r="2" fill="${EMBER}" opacity=".85"/>`,
+      calm ? '' : `<circle r="4" fill="url(#bh)"><animateMotion path="${fl.d}" dur="${dur(fl.dur)}s" begin="${begin(fl.off, fl.dur)}" repeatCount="indefinite"/><animate attributeName="opacity" values="0;1;1;0" dur="${dur(fl.dur)}s" begin="${begin(fl.off, fl.dur)}" repeatCount="indefinite"/></circle>`,
     )
   }
 
@@ -374,7 +376,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const o = 0.4 + hot * 0.6
     const d = 1.4 + (n % 5) * 0.6
     out.push(
-      `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="${f(4 + hot * 4)}" fill="${hot > 0.3 ? tone(p.lobe) : EMBER}" opacity="${f(o * 0.6)}" filter="url(#soft)"/>`,
+      `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="${i0(8 + hot * 8)}" fill="url(#${hot > 0.3 ? (tone(p.lobe) === RED ? 'br' : 'bh') : 'be'})" opacity="${f(o * 0.8)}"/>`,
       `<circle cx="${i0(p.x)}" cy="${i0(p.y)}" r="${f(1.8 + hot * 1.2)}" fill="${HOT}"><animate attributeName="opacity" values="${f(o * 0.4)};${f(o)};${f(o * 0.4)}" dur="${dur(d)}s" begin="${begin((n * 0.37) % 1, d)}" repeatCount="indefinite"/></circle>`,
     )
   })
@@ -418,11 +420,11 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   // Vital signs: memory on the left, the 5-hour limit on the right, cost between.
   const fiveHour = v.limits.find(l => l.kind === 'five_hour')
   const week = v.limits.find(l => l.kind === 'seven_day')
-  const tokens = v.contextTokens !== undefined && v.contextWindow ? `${Math.round(v.contextTokens / 1000)}k / ${Math.round(v.contextWindow / 1000)}k` : 'no reading yet'
+  const tokens = v.contextTokens !== undefined && v.contextWindow ? `${Math.round(v.contextTokens / 1000)}k/${Math.round(v.contextWindow / 1000)}k` : '--'
   out.push(
     gauge(50, 326, 'MEMORY', v.contextPct, tokens),
-    gauge(430, 326, '5H LIMIT', fiveHour?.pct, fiveHour ? untilReset(fiveHour.resetsAt, now) : 'no reading yet'),
-    `<text class="gc" x="${C.x}" y="378" text-anchor="middle">${v.costUsd !== undefined ? `$${v.costUsd.toFixed(2)}` : ''}${week ? `${v.costUsd !== undefined ? ' &#183; ' : ''}WEEK ${Math.round(week.pct)}%` : ''}</text>`,
+    gauge(430, 326, '5H LIMIT', fiveHour?.pct, fiveHour ? untilReset(fiveHour.resetsAt, now).replace('resets ', '') : '--'),
+    `<text class="gc" x="${C.x}" y="386" text-anchor="middle">${v.costUsd !== undefined ? `$${v.costUsd.toFixed(2)}` : ''}${week ? `${v.costUsd !== undefined ? ' &#183; ' : ''}WEEK ${Math.round(week.pct)}%` : ''}</text>`,
   )
 
   // Alarms: a loop washes the scene red; a waiting prompt sends out a beacon.
@@ -461,8 +463,25 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     const above = lobe.at.y < C.y
     const y = lobe.at.y + (above ? -30 : 34)
     out.push(
-      `<g opacity="0"><text class="lbl" x="${lobe.at.x}" y="${y}" text-anchor="middle" style="fill:${step.isError ? RED : HOT}">${lobe.name}</text><text class="sub" x="${lobe.at.x}" y="${y + 13}" text-anchor="middle">${esc(clip(`${step.verb} ${step.detail}`.trim(), 34))}</text><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.08;.75;1" dur="4s" begin="-${f((now - step.at) / 1000)}s" fill="freeze"/></g>`,
+      `<g opacity="0"><text class="lbl" x="${lobe.at.x}" y="${y}" text-anchor="middle" style="fill:${step.isError ? RED : HOT}">${lobe.name}</text><text class="sub" x="${lobe.at.x}" y="${y + 17}" text-anchor="middle">${esc(clip(`${step.verb} ${step.detail}`.trim(), 26))}</text><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.08;.75;1" dur="4s" begin="-${f((now - step.at) / 1000)}s" fill="freeze"/></g>`,
     )
+  }
+
+  // Speaking: the outline pulses with the voice, a waveform rises from the
+  // floor, and the words run beneath it.
+  if (hud.speaking) {
+    out.push(
+      `<path d="${GEO.outlinePath}" fill="none" stroke="${HOT}" stroke-width="2" filter="url(#glow)"><animate attributeName="opacity" values=".15;.8;.35;.95;.2;.6;.15" dur="1.1s" repeatCount="indefinite"/></path>`,
+    )
+    for (let k = 0; k < 15; k++) {
+      const x = C.x - 70 + k * 10
+      const peak = 6 + ((k * 7) % 11) * 2.2 * (1 - Math.abs(k - 7) / 9)
+      const d = 0.45 + ((k * 5) % 7) * 0.08
+      out.push(
+        `<rect x="${x - 2}" y="${300 - peak / 2}" width="4" height="${f(peak)}" rx="2" fill="${HOT}" filter="url(#glow)"><animate attributeName="height" values="2;${f(peak)};4;${f(peak * 0.7)};2" dur="${f(d)}s" repeatCount="indefinite"/><animate attributeName="y" values="299;${f(300 - peak / 2)};298;${f(300 - peak * 0.35)};299" dur="${f(d)}s" repeatCount="indefinite"/></rect>`,
+      )
+    }
+    out.push(`<text class="say" x="${C.x}" y="350" text-anchor="middle">${esc(clip(hud.speaking, 30))}</text>`)
   }
 
   // HUD frame: corner brackets, edge rulers, and a ticker of recent actions.
@@ -471,15 +490,15 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   out.push(
     `<path d="M6 22V6H22M458 6H474V22M6 378V394H22M458 394H474V378" fill="none" stroke="${AMBER}" stroke-width="1.4" opacity=".85"/>`,
     `<path d="${ticks(6, 1)}${ticks(474, -1)}" stroke="${AMBER}" stroke-width=".8" opacity=".5"/>`,
-    `<path d="M28 20H452" stroke="${AMBER}" stroke-width=".6" opacity=".4"/>`,
+    `<path d="M28 25H452" stroke="${AMBER}" stroke-width=".6" opacity=".4"/>`,
   )
   const recentSteps = b.feed.filter(s => s.region !== 'core').slice(-8).reverse()
   if (recentSteps.length > 0) {
     const line = recentSteps.map(s => `${s.isError ? '✖' : '▸'} ${clip(`${s.verb} ${s.detail}`.trim(), 40)}`).join('     ')
-    const width = line.length * 5.5
+    const width = line.length * 7.9
     const secs = (W + width) / (calm ? 14 : 38)
     out.push(
-      `<g clip-path="url(#strip)"><text class="tk" y="15">${esc(line)}<animateTransform attributeName="transform" type="translate" values="${W} 0;${f(-width)} 0" dur="${f(secs)}s" repeatCount="indefinite"/></text></g>`,
+      `<g clip-path="url(#strip)"><text class="tk" y="18">${esc(line)}<animateTransform attributeName="transform" type="translate" values="${W} 0;${f(-width)} 0" dur="${f(secs)}s" repeatCount="indefinite"/></text></g>`,
     )
   }
 
@@ -505,7 +524,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
   const highlights = LOBES.map(l => {
     const above = l.at.y < C.y
     const y = l.at.y + (above ? -30 : 34)
-    return `<g class="hl h-${l.id}"><use href="#m-${l.id}" stroke="${HOT}" stroke-width="1.2" filter="url(#glow)"/><circle cx="${l.at.x}" cy="${l.at.y}" r="26" fill="url(#cur)"/><text class="lbl" x="${l.at.x}" y="${y}" text-anchor="middle">${l.name} &#183; ${b.counts[l.id]}</text><text class="sub" x="${l.at.x}" y="${y + 13}" text-anchor="middle">${l.what}</text></g>`
+    return `<g class="hl h-${l.id}"><use href="#m-${l.id}" stroke="${HOT}" stroke-width="1.2" filter="url(#glow)"/><circle cx="${l.at.x}" cy="${l.at.y}" r="26" fill="url(#cur)"/><text class="lbl" x="${l.at.x}" y="${y}" text-anchor="middle">${l.name} &#183; ${b.counts[l.id]}</text><text class="sub" x="${l.at.x}" y="${y + 17}" text-anchor="middle">${esc(l.what)}</text></g>`
   })
 
   const age = hud.bootAge ?? BOOT_MS
@@ -518,12 +537,16 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
     ? `<g class="v" opacity="1"><path d="${GEO.outlinePath}" fill="none" stroke="${HOT}" stroke-width="1.6" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" filter="url(#glow)"><animate attributeName="stroke-dashoffset" values="1;0" dur="1.3s" begin="${bootBegin}" fill="freeze"/></path><text class="bn" x="${C.x}" y="${C.y + 4}" text-anchor="middle" fill="${HOT}">INITIALIZING NEURAL CORE</text><rect x="${C.x - 80}" y="${C.y + 14}" width="160" height="2" fill="#4a1e06"/><rect x="${C.x - 80}" y="${C.y + 14}" width="0" height="2" fill="${HOT}"><animate attributeName="width" values="0;160" dur="2.2s" begin="${bootBegin}" fill="freeze"/></rect><animate attributeName="opacity" values="1;1;0" keyTimes="0;.8;1" dur="${BOOT_MS / 1000}s" begin="${bootBegin}" fill="freeze"/></g>`
     : ''
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * 3}" height="${H * 3}">
 <style>${CSS}</style>
 <defs>
 <radialGradient id="bg" cx=".5" cy=".42" r=".75"><stop offset="0" stop-color="#2a0d00"/><stop offset=".55" stop-color="#110400"/><stop offset="1" stop-color="#030100"/></radialGradient>
 <radialGradient id="body" cx=".45" cy=".4" r=".7"><stop offset="0" stop-color="#ff7a10" stop-opacity=".2"/><stop offset=".7" stop-color="#ff5a00" stop-opacity=".07"/><stop offset="1" stop-color="#ff5a00" stop-opacity=".02"/></radialGradient>
 <radialGradient id="pool"><stop offset="0" stop-color="#e0660f" stop-opacity=".45"/><stop offset="1" stop-color="#e0660f" stop-opacity="0"/></radialGradient>
+<radialGradient id="be"><stop offset="0" stop-color="${EMBER}"/><stop offset="1" stop-color="${EMBER}" stop-opacity="0"/></radialGradient>
+<radialGradient id="bd"><stop offset="0" stop-color="#e03a00"/><stop offset="1" stop-color="#e03a00" stop-opacity="0"/></radialGradient>
+<radialGradient id="bh"><stop offset="0" stop-color="${HOT}"/><stop offset="1" stop-color="${HOT}" stop-opacity="0"/></radialGradient>
+<radialGradient id="br"><stop offset="0" stop-color="${RED}"/><stop offset="1" stop-color="${RED}" stop-opacity="0"/></radialGradient>
 <radialGradient id="cur"><stop offset="0" stop-color="#ffd08a" stop-opacity=".55"/><stop offset=".45" stop-color="#ff9a3c" stop-opacity=".18"/><stop offset="1" stop-color="#ff9a3c" stop-opacity="0"/></radialGradient>
 <linearGradient id="scan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd59a" stop-opacity="0"/><stop offset=".5" stop-color="#ffd59a" stop-opacity=".28"/><stop offset="1" stop-color="#ffd59a" stop-opacity="0"/></linearGradient>
 <linearGradient id="shade" x1="0" y1="0" x2=".25" y2="1"><stop offset="0" stop-color="#ffc080" stop-opacity=".16"/><stop offset=".45" stop-color="#ffe8cc" stop-opacity="0"/><stop offset="1" stop-color="#0d0300" stop-opacity=".2"/></linearGradient>
@@ -531,7 +554,7 @@ export function drawBrain(b: Brain, now: number, hud: Hud): string {
 <filter id="soft" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="3.5"/></filter>
 <path id="folds" d="${GEO.folds}" fill="none" stroke-linecap="round"/>
 <clipPath id="clip"><path d="${GEO.outlinePath}"/></clipPath>
-<clipPath id="strip"><rect x="28" y="4" width="424" height="16"/></clipPath>
+<clipPath id="strip"><rect x="28" y="2" width="424" height="22"/></clipPath>
 ${bootMask}
 </defs>
 <g class="v"${isBooting ? ' mask="url(#boot)"' : ''}>

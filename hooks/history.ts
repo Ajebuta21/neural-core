@@ -58,7 +58,7 @@ export function lastDays(days: Record<string, Totals>, n: number, now: number): 
 
 export const isStale = (day: string, now: number) => day < dayOf(now - KEEP_DAYS * 86400000)
 
-// A bar per day; today's burns brightest.
+// A bar per day in a neutral grey that reads on light or dark; today's darkest.
 export function chartSvg(series: { day: string; t: Totals }[]): string {
   const W = 320
   const H = 74
@@ -71,10 +71,10 @@ export function chartSvg(series: { day: string; t: Totals }[]): string {
       const h = s.t.actions === 0 ? 1.5 : Math.max(3, (s.t.actions / max) * 50)
       const isToday = i === series.length - 1
       const letter = 'SMTWTFS'[new Date(`${s.day}T12:00:00`).getDay()]
-      return `<rect x="${x.toFixed(1)}" y="${(56 - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="${isToday ? '#fff1cf' : '#ff8a1f'}" opacity="${s.t.actions === 0 ? 0.25 : isToday ? 1 : 0.75}"/><text x="${(x + bw / 2).toFixed(1)}" y="70" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="${isToday ? '#fff1cf' : '#c98a50'}">${letter}</text>`
+      return `<rect x="${x.toFixed(1)}" y="${(56 - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="${isToday ? '#b4b4b4' : '#888'}" opacity="${s.t.actions === 0 ? 0.3 : isToday ? 1 : 0.6}"/><text x="${(x + bw / 2).toFixed(1)}" y="70" text-anchor="middle" font-family="-apple-system,system-ui,sans-serif" font-size="10" fill="#888" opacity="${isToday ? 1 : 0.75}">${letter}</text>`
     })
     .join('')
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><path d="M0 56.5H${W}" stroke="#7a3a10" stroke-width="1"/>${bars}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * 3}" height="${H * 3}"><path d="M0 56.5H${W}" stroke="#888" stroke-opacity=".35" stroke-width="1"/>${bars}</svg>`
 }
 
 // The same bars as text, for the terminal.

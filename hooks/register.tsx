@@ -46,26 +46,33 @@ const LONG_TASK_MS = 20000
 const WAIT_ALERT_MS = 1500
 const MEMORY_WARN_PCT = 80
 
-const AMBER = '#ff8a1f'
-const WARN = '#ffd23f'
-const HOT = '#fff1cf'
-const PALE = '#ffc58a'
-// Card borders and dividers.
-const LINE = '#6b3410'
-const RED = '#ff3b30'
-const TAG: Record<Region, { name: string; color: string }> = {
-  build: { name: 'BUILD', color: '#ff7a1a' },
-  exec: { name: 'EXEC', color: '#ffb020' },
-  link: { name: 'LINK', color: '#ff9a5c' },
-  see: { name: 'SEE', color: '#ffc861' },
-  search: { name: 'SEARCH', color: '#ff9238' },
-  swarm: { name: 'SWARM', color: '#ff5e3a' },
-  core: { name: 'TASK', color: AMBER },
+// Only the brain is drawn in amber; the panel around it takes the theme's own
+// colors, so it reads as part of the app.
+const TAG: Record<Region, { name: string }> = {
+  build: { name: 'BUILD' },
+  exec: { name: 'EXEC' },
+  link: { name: 'LINK' },
+  see: { name: 'SEE' },
+  search: { name: 'SEARCH' },
+  swarm: { name: 'SWARM' },
+  core: { name: 'TASK' },
 }
-const MODE: Record<Mode, { text: string; color: string }> = {
-  idle: { text: 'IDLE', color: '#a0785a' },
-  thinking: { text: 'THINKING', color: '#ffb020' },
-  acting: { text: 'EXECUTING', color: AMBER },
+const MODE: Record<Mode, { text: string; color?: string }> = {
+  idle: { text: 'IDLE' },
+  thinking: { text: 'THINKING' },
+  acting: { text: 'EXECUTING' },
+}
+
+// A reading's theme color: warning from 70%, error from 90%.
+const levelKey = (pct: number | undefined) => (pct === undefined ? undefined : pct >= 90 ? 'error' : pct >= 70 ? 'warning' : undefined)
+
+// Rules and meters in a mid grey that reads on a light or dark panel. The
+// markup is wider than any pane, so the panel draws them at the pane's width.
+const RULE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 3" width="1000" height="3" preserveAspectRatio="none"><rect width="1000" height="3" fill="#888" opacity=".22"/></svg>`
+function meter(pct: number | undefined): string {
+  const p = Math.max(0, Math.min(100, pct ?? 0))
+  const fill = p >= 90 ? '#e5534b' : p >= 70 ? '#d9a23a' : '#a3a3a3'
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 12" width="1000" height="12" preserveAspectRatio="none"><rect width="1000" height="12" fill="#888" opacity=".25"/><rect width="${Math.round(p * 10)}" height="12" fill="${fill}"/></svg>`
 }
 
 function regionOf(tool: string): Exclude<Region, 'core'> {
@@ -190,10 +197,24 @@ async function patchVitals($: EngineInterface, change: (v: Vitals) => Vitals): P
   return update($, vitals, change)
 }
 
-async function chime($: EngineInterface, name: 'done' | 'ping' | 'alert') {
+// A chime, then the brain says the words: each only while switched on. Run
+// without awaiting it, so no hook waits on the speakers.
+async function announce($: EngineInterface, sound: 'done' | 'ping' | 'alert' | undefined, words?: string) {
   const v = await read($, vitals)
-  if (v.isMuted) return
-  await $.audio.play({ asset: `sounds/${name}.wav` }).catch(() => undefined)
+  if (sound && !v.isMuted) await $.audio.play({ asset: `sounds/${sound}.wav` }).catch(() => undefined)
+  if (!words || v.isVoiceOff) return
+  const at = Date.now()
+  await update($, vitals, x => ({ ...x, speaking: { text: words, at } }))
+  await $.audio.speak(words).catch(() => undefined)
+  await patchVitals($, x => (x.speaking?.at === at ? { ...x, speaking: undefined } : x))
+}
+
+// A duration as it is said aloud: "42 seconds", "3 minutes".
+function spoken(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s} second${s === 1 ? '' : 's'}`
+  const m = Math.round(s / 60)
+  return `${m} minute${m === 1 ? '' : 's'}`
 }
 
 function took(ms: number | undefined): string {
@@ -247,7 +268,7 @@ export const register: Register = on => {
     const after = await patchVitals($, v => withUsage(v, e))
     if ((before.contextPct ?? 0) < MEMORY_WARN_PCT && (after.contextPct ?? 0) >= MEMORY_WARN_PCT) {
       $.ui.toast(`Memory is ${after.contextPct}% full. Consider /compact or a fresh session soon.`)
-      await chime($, 'alert')
+      void announce($, 'alert', `Memory is ${Math.round(after.contextPct ?? 0)} percent full.`)
     }
 
     return next(e)
@@ -265,7 +286,7 @@ export const register: Register = on => {
         void (async () => {
           if ((await read($, vitals)).waiting?.id !== id) return
           $.ui.toast(`Claude needs your OK: ${what}`)
-          await chime($, 'ping')
+          void announce($, 'ping', `I need your OK to continue. ${what}.`)
         })()
       })
     }
@@ -304,6 +325,8 @@ export const register: Register = on => {
   on('command.run', { command: 'brain' }, async $ => {
     await update($, vitals, v => ({ ...v, bootAt: Date.now() }))
     await $.ui.open({ id: PANE, title: TITLE })
+
+    void announce($, undefined, 'Neural core online.')
 
     return { text: 'Neural Core online.' }
   })
@@ -364,7 +387,7 @@ export const register: Register = on => {
     if (loop && (await read($, vitals)).loopWarned !== loop) {
       await update($, vitals, v => ({ ...v, loopWarned: loop }))
       $.ui.toast(`Possible loop: Claude keeps repeating "${loop}". You may want to step in.`)
-      await chime($, 'alert')
+      void announce($, 'alert', `I may be stuck in a loop. I keep repeating: ${loop.replace(/ ×\d+$/, '')}.`)
     }
 
     return ran
@@ -379,16 +402,24 @@ export const register: Register = on => {
       busyMs: (x.busyMs ?? 0) + (x.turnStartedAt ? ended - x.turnStartedAt : 0),
     }))
     const ms = v.turnStartedAt ? ended - v.turnStartedAt : 0
+    const summary = summarize((await read($, brain)).feed)
     await update($, brain, b => {
-      const summary = summarize(b.feed)
       const card: Spark[] = summary
         ? [{ id: `sum-${Date.now()}`, region: 'core', kind: 'summary', verb: 'Task complete', detail: '', isError: false, isDone: true, at: Date.now(), ms: ms || undefined, summary }]
         : []
       return { ...b, mode: 'idle' as Mode, feed: [...b.feed, ...card].slice(-FEED_SIZE) }
     })
-    if (ms >= LONG_TASK_MS) {
-      $.ui.toast(`Done in ${took(ms)}.`)
-      await chime($, 'done')
+    if (ms >= LONG_TASK_MS) $.ui.toast(`Done in ${took(ms)}.`)
+    if (summary) {
+      const files = summary.files.length
+      const words = [
+        `Done in ${spoken(ms)}. `,
+        `${summary.steps} step${summary.steps === 1 ? '' : 's'}`,
+        files > 0 ? `, ${files} file${files === 1 ? '' : 's'} changed` : '',
+        summary.errors > 0 ? `, ${summary.errors} error${summary.errors === 1 ? '' : 's'}` : '',
+        '.',
+      ].join('')
+      void announce($, ms >= LONG_TASK_MS ? 'done' : undefined, words.replace(/^Done in 0 seconds\. /, 'Done. '))
     }
     await saveTotals($)
 
@@ -399,10 +430,9 @@ export const register: Register = on => {
     const b = await read($, brain)
     const v = await read($, vitals)
     const loop = loopIn(b.feed)
-    const mode = loop ? { text: 'LOOPING', color: RED } : v.waiting ? { text: 'WAITING ON YOU', color: HOT } : MODE[b.mode]
+    const mode = loop ? { text: 'LOOPING', color: 'error' } : v.waiting ? { text: 'WAITING ON YOU', color: 'warning' } : MODE[b.mode]
     const fiveHour = v.limits.find(l => l.kind === 'five_hour')
     const week = v.limits.find(l => l.kind === 'seven_day')
-    const gaugeColor = (pct: number | undefined) => (pct === undefined ? undefined : pct >= 90 ? RED : pct >= 70 ? WARN : AMBER)
     const pctText = (pct: number | undefined) => (pct === undefined ? '--' : `${Math.round(pct)}%`)
     const toggleSound = () => update($, vitals, x => ({ ...x, isMuted: !x.isMuted }))
     const toggleCalm = () => update($, vitals, x => ({ ...x, isCalm: !x.isCalm }))
@@ -427,8 +457,8 @@ export const register: Register = on => {
     const rows = buildRows(b.feed, vw.filter, SHOWN)
     const status = (items: Spark[]) => {
       const s = items[items.length - 1]!
-      if (!s.isDone) return { text: '● live', color: AMBER }
-      if (s.isError) return { text: '✖ failed', color: RED }
+      if (!s.isDone) return { text: 'Running', color: 'text' }
+      if (s.isError) return { text: 'Failed', color: 'error' }
       const ms = items.reduce((sum, x) => sum + (x.ms ?? 0), 0)
       return { text: took(ms), color: undefined }
     }
@@ -439,9 +469,9 @@ export const register: Register = on => {
       }))
     const setFilter = (filter: string) => update($, view, x => ({ ...x, filter }))
     const filters = [
-      { id: 'all', name: 'ALL', n: b.total, color: AMBER },
-      { id: 'errors', name: 'ERRORS', n: b.errors, color: RED },
-      ...LOBES.map(l => ({ id: l.id as string, name: l.name, n: b.counts[l.id], color: TAG[l.id].color })),
+      { id: 'all', name: 'ALL', n: b.total },
+      { id: 'errors', name: 'ERRORS', n: b.errors },
+      ...LOBES.map(l => ({ id: l.id as string, name: l.name, n: b.counts[l.id] })),
     ]
     const filterName = filters.find(x => x.id === vw.filter)?.name ?? 'ALL'
     const tagOf = (s: Spark) => TAG[s.region]
@@ -451,29 +481,29 @@ export const register: Register = on => {
       const { Box, Text } = $.ui.resolve(e)
       return (
         <Box flexDirection="column">
-          <Text bold color={AMBER}>◉ NEURAL CORE <Text color={mode.color}>· {mode.text}</Text></Text>
+          <Text bold>NEURAL CORE <Text color={mode.color} dimColor={!mode.color}>· {mode.text}</Text></Text>
           <Text dimColor>{stats}</Text>
           <Text>
-            <Text color={gaugeColor(v.contextPct)}>MEMORY {pctText(v.contextPct)}</Text>
+            <Text color={levelKey(v.contextPct)}>MEMORY {pctText(v.contextPct)}</Text>
             <Text dimColor> · </Text>
-            <Text color={gaugeColor(fiveHour?.pct)}>5H {pctText(fiveHour?.pct)}</Text>
+            <Text color={levelKey(fiveHour?.pct)}>5H {pctText(fiveHour?.pct)}</Text>
             {week && <Text dimColor> · WEEK {pctText(week.pct)}</Text>}
             {v.costUsd !== undefined && <Text dimColor> · ${v.costUsd.toFixed(2)}</Text>}
           </Text>
-          {loop && <Text color={RED} bold>⚠ Possible loop: {loop}</Text>}
-          {!loop && v.waiting && <Text color={HOT} bold>⏳ Waiting for your OK: {v.waiting.what}</Text>}
+          {loop && <Text color="error" bold>Possible loop: {loop}</Text>}
+          {!loop && v.waiting && <Text color="warning" bold>Waiting for your OK: {v.waiting.what}</Text>}
           <Text> </Text>
           {rows.length === 0 && <Text dimColor>No activity yet.</Text>}
           {rows.map((row: Row) => {
             if (row.kind === 'task')
               return (
-                <Text color={AMBER} bold>
-                  ▸ NEW TASK {clock(row.s.at)} <Text dimColor>{short(row.s.detail, 70)}</Text>
+                <Text bold>
+                  NEW TASK {clock(row.s.at)} <Text dimColor>{short(row.s.detail, 70)}</Text>
                 </Text>
               )
             if (row.kind === 'summary')
               return (
-                <Text color={HOT}>
+                <Text color="success">
                   ✓ TASK COMPLETE {took(row.s.ms)}{' '}
                   <Text dimColor>
                     · {row.s.summary?.steps} steps · {row.s.summary?.files.length} files changed · {row.s.summary?.errors} errors
@@ -482,22 +512,22 @@ export const register: Register = on => {
               )
             if (row.kind === 'compact')
               return (
-                <Text color={HOT}>
-                  ⟲ MEMORY COMPACTED <Text dimColor>{kTokens(row.s.tokens?.before)} → {kTokens(row.s.tokens?.after)}</Text>
+                <Text>
+                  MEMORY COMPACTED <Text dimColor>{kTokens(row.s.tokens?.before)} → {kTokens(row.s.tokens?.after)}</Text>
                 </Text>
               )
             const line = headline(row.items)
             const first = row.items[0]!
             return (
               <Text>
-                <Text color={row.items.some(x => x.isError) ? RED : tagOf(first).color}>{tagOf(first).name.padEnd(7)}</Text>
+                <Text color={row.items.some(x => x.isError) ? 'error' : undefined} dimColor={!row.items.some(x => x.isError)}>{tagOf(first).name.padEnd(7)}</Text>
                 {line.verb} <Text dimColor>{short(line.detail, 60)}</Text>{' '}
                 <Text color={status(row.items).color} dimColor={!status(row.items).color}>{status(row.items).text}</Text>
               </Text>
             )
           })}
           <Text> </Text>
-          <Text color={AMBER} bold>HISTORY <Text dimColor>{sparkline(series)} last 14 days</Text></Text>
+          <Text bold>HISTORY <Text dimColor>{sparkline(series)} last 14 days</Text></Text>
           <Text dimColor>Today: {totalsLine(todayT)}</Text>
           <Text dimColor>7 days: {totalsLine(last7)}</Text>
           <Text dimColor>All time: {lifetime.actions} actions · {lifetime.tasks} tasks</Text>
@@ -511,196 +541,222 @@ export const register: Register = on => {
     const num = (n: number) => n.toLocaleString('en-US')
     const money = (n: number | undefined) => (n === undefined ? '--' : `$${n.toFixed(2)}`)
     const hasError = (items: Spark[]) => items.some(x => x.isError)
-    const tile = (label: string, value: string, sub: string, color: string | undefined) => (
-      <Box flexDirection="column" width="50%" flexShrink={1} minWidth={0} borderStyle="round" borderColor={LINE} paddingX={1}>
-        <Text size="caption" dimColor wrap="truncate">{label}</Text>
-        <Text size="heading" weight="semibold" tabular color={color} dimColor={!color} wrap="truncate">{value}</Text>
-        <Text size="caption" dimColor wrap="truncate">{sub || ' '}</Text>
-      </Box>
-    )
-    const section = (title: string, right?: RenderChildren) => (
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1}>
-        <Text size="caption" weight="semibold" color={AMBER}>{title}</Text>
+    const toggleVoice = () => update($, vitals, x => ({ ...x, isVoiceOff: !x.isVoiceOff, speaking: undefined }))
+    // Thin rules and meters, drawn in a mid grey that reads on light and dark.
+    const divider = <Svg source={RULE} alt="" />
+    const heading = (title: string, right?: RenderChildren) => (
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
+        <Text weight="medium" wrap="truncate">{title}</Text>
         {right}
       </Box>
     )
-    const callout = (title: string, color: string, lines: string[]) => (
-      <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} minWidth={0}>
-        <Text size="caption" weight="bold" color={color}>{title}</Text>
+    const pair = (label: string, value: string, color?: string) => (
+      <Box flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
+        <Box flexShrink={1} minWidth={0}>
+          <Text size="footnote" dimColor wrap="truncate">{label}</Text>
+        </Box>
+        <Text size="footnote" tabular color={color} dimColor={!color} wrap="truncate">{value}</Text>
+      </Box>
+    )
+    const gauge = (label: string, pct: number | undefined, right: string) => (
+      <Box flexDirection="column" gap="xs" minWidth={0}>
+        <Box flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
+          <Box flexShrink={1} minWidth={0}>
+            <Text size="footnote" wrap="truncate">
+              {label} <Text color={levelKey(pct)} dimColor={!levelKey(pct)}>{pct === undefined ? '--' : `${Math.round(pct)}% used`}</Text>
+            </Text>
+          </Box>
+          <Text size="footnote" tabular dimColor wrap="truncate">{right}</Text>
+        </Box>
+        <Svg source={meter(pct)} alt={`${label}: ${pct === undefined ? 'no reading' : `${Math.round(pct)}% used`}`} />
+      </Box>
+    )
+    const setting = (key: string, label: string, hint: string, isOn: boolean, onPress: () => unknown) => (
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
+        <Box flexDirection="column" flexShrink={1} minWidth={0}>
+          <Text size="footnote" wrap="truncate">{label}</Text>
+          <Text size="caption" dimColor wrap="truncate">{hint}</Text>
+        </Box>
+        <Button key={key} label={isOn ? 'On' : 'Off'} dimColor={!isOn} onPress={onPress} />
+      </Box>
+    )
+    const notice = (title: string, color: string, lines: string[]) => (
+      <Box flexDirection="column" minWidth={0}>
+        <Text size="footnote" weight="semibold" color={color} wrap="truncate">{title}</Text>
         {lines.map(l => (
-          <Text size="footnote" wrap="truncate">{l}</Text>
+          <Text size="footnote" dimColor wrap="truncate">{l}</Text>
         ))}
       </Box>
     )
     const tableRow = (label: string, a: string, b: string, isHead = false) => (
       <Box flexDirection="row" columnGap={1}>
-        <Box width="40%" minWidth={0}>
-          <Text size="caption" dimColor={!isHead} weight={isHead ? 'semibold' : 'regular'} color={isHead ? AMBER : undefined} wrap="truncate">{label}</Text>
+        <Box width="44%" minWidth={0}>
+          <Text size="footnote" dimColor wrap="truncate">{label}</Text>
         </Box>
-        <Box width="30%" minWidth={0} alignItems="flex-end">
-          <Text size="caption" tabular weight={isHead ? 'semibold' : 'medium'} color={isHead ? AMBER : undefined} wrap="truncate">{a}</Text>
+        <Box width="28%" minWidth={0} alignItems="flex-end">
+          <Text size={isHead ? 'caption' : 'footnote'} tabular dimColor={isHead} wrap="truncate">{a}</Text>
         </Box>
-        <Box width="30%" minWidth={0} alignItems="flex-end">
-          <Text size="caption" tabular weight={isHead ? 'semibold' : 'regular'} color={isHead ? AMBER : undefined} dimColor={!isHead} wrap="truncate">{b}</Text>
+        <Box width="28%" minWidth={0} alignItems="flex-end">
+          <Text size={isHead ? 'caption' : 'footnote'} tabular dimColor wrap="truncate">{b}</Text>
         </Box>
       </Box>
     )
     const filterOptions = filters
       .filter(fl => fl.id === 'all' || fl.id === vw.filter || fl.n > 0)
       .map(fl => ({ value: fl.id, label: `${fl.id === 'all' ? 'All activity' : fl.id === 'errors' ? 'Errors' : fl.name.charAt(0) + fl.name.slice(1).toLowerCase()} (${fl.n})` }))
+    const stateText = loop ? 'Looping' : v.waiting ? 'Waiting on you' : v.speaking ? 'Speaking' : b.mode === 'acting' ? 'Working' : b.mode === 'thinking' ? 'Thinking' : 'Idle'
+    const stateColor = loop ? 'error' : v.waiting ? 'warning' : undefined
 
     return (
       <Box flexDirection="column" gap={1} minWidth={0} overflow="hidden">
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1}>
-          <Text weight="bold" color={AMBER} wrap="truncate">NEURAL CORE</Text>
-          <Text size="caption" weight="bold" color="#1a0700" backgroundColor={mode.color}>{` ${mode.text} `}</Text>
-        </Box>
-
-        <Box flexDirection="row" columnGap={1}>
-          {tile('MEMORY', pctText(v.contextPct), v.contextTokens !== undefined && v.contextWindow ? `${kTokens(v.contextTokens)} of ${kTokens(v.contextWindow)}` : 'no reading yet', gaugeColor(v.contextPct))}
-          {tile('5-HOUR LIMIT', pctText(fiveHour?.pct), fiveHour?.resetsAt ? untilReset(fiveHour.resetsAt, now) : 'no reading yet', gaugeColor(fiveHour?.pct))}
-        </Box>
-        <Box flexDirection="row" columnGap={1}>
-          {tile('WEEKLY LIMIT', pctText(week?.pct), week?.resetsAt ? untilReset(week.resetsAt, now) : week ? ' ' : 'no reading yet', gaugeColor(week?.pct))}
-          {tile('SESSION', money(v.costUsd), `${num(b.total)} actions · ${uptime(b.startedAt)}`, v.costUsd === undefined ? undefined : PALE)}
-        </Box>
-
-        {loop && callout('POSSIBLE LOOP', RED, [`Repeating: ${loop}`, 'No changes between attempts. You may want to step in.'])}
-        {!loop && v.waiting && callout('WAITING FOR YOUR OK', HOT, [v.waiting.what])}
-        {helpers.length > 0 &&
-          callout(`${helpers.length} HELPER${helpers.length === 1 ? '' : 'S'} AT WORK`, TAG.swarm.color, helpers.slice(0, 4))}
-
-        <Box flexDirection="column" alignItems="center" gap={1} minWidth={0}>
-          <Svg
-            source={drawBrain(b, now, {
-              vitals: v,
-              loop,
-              calm: v.isCalm,
-              bootAge: v.bootAt ? now - v.bootAt : undefined,
-              helpers,
-            })}
-            alt={`Holographic brain, ${mode.text.toLowerCase()}: ${LOBES.map(l => `${l.name} ${b.counts[l.id]}`).join(', ')}.`}
-            isInteractive
-          />
-          <Box flexDirection="row" flexWrap="wrap" justifyContent="center" alignItems="center" columnGap={1} rowGap={1}>
-            <Button key="sound" label={v.isMuted ? 'Sound off' : 'Sound on'} onPress={toggleSound} />
-            <Button key="calm" label={v.isCalm ? 'Calm on' : 'Calm off'} onPress={toggleCalm} />
-          </Box>
-          <Text size="caption" dimColor wrap="truncate">Hover a region to inspect it. Click to fire it.</Text>
-        </Box>
-
-        <Box flexDirection="column" borderStyle="round" borderColor={LINE} paddingX={1} paddingY={1} gap={1} minWidth={0}>
-          {section(
-            'ACTIVITY',
-            Select ? (
-              <Select key="filter" options={filterOptions} value={vw.filter} onSelect={(value: string) => setFilter(value)} />
-            ) : (
-              <Text size="caption" dimColor>{filterName === 'ALL' ? 'newest first' : filterName}</Text>
-            ),
-          )}
-
-          {rows.length === 0 && (
-            <Text size="footnote" dimColor>
-              {vw.filter === 'all' ? 'Nothing yet. Activity appears here as Claude works.' : 'Nothing matches this filter yet.'}
+        <Svg
+          source={drawBrain(b, now, {
+            vitals: v,
+            loop,
+            calm: v.isCalm,
+            bootAge: v.bootAt ? now - v.bootAt : undefined,
+            helpers,
+            speaking: v.speaking?.text,
+          })}
+          alt={`Holographic brain, ${stateText.toLowerCase()}: ${LOBES.map(l => `${l.name} ${b.counts[l.id]}`).join(', ')}. Hover a region to inspect it, click to fire it.`}
+          isInteractive
+        />
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
+          <Box flexShrink={1} minWidth={0}>
+            <Text size="footnote" weight="medium" color={stateColor} wrap="truncate">
+              {stateText}
+              <Text weight="regular" dimColor>{` · ${num(b.total)} ${b.total === 1 ? 'action' : 'actions'}`}</Text>
             </Text>
-          )}
-          {rows.map((row: Row, index: number) => {
-            if (row.kind === 'task')
-              return (
-                <Box flexDirection="column" marginTop={index === 0 ? 0 : 1} minWidth={0}>
-                  <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
-                    <Text size="caption" weight="bold" color={AMBER}>TASK</Text>
-                    <Text size="caption" tabular dimColor>{clock(row.s.at)}</Text>
+          </Box>
+          <Text size="footnote" tabular dimColor wrap="truncate">{`Online ${uptime(b.startedAt)}`}</Text>
+        </Box>
+        {v.speaking && (
+          <Text size="footnote" italic dimColor wrap="truncate">{`“${v.speaking.text}”`}</Text>
+        )}
+        {loop && notice('Possible loop', 'error', [`Repeating: ${loop}`, 'No changes between attempts. You may want to step in.'])}
+        {!loop && v.waiting && notice('Waiting for your OK', 'warning', [v.waiting.what])}
+        {helpers.length > 0 && notice(`${helpers.length} helper${helpers.length === 1 ? '' : 's'} at work`, 'text', helpers.slice(0, 4))}
+
+        {divider}
+        {heading('Usage')}
+        {gauge('Memory', v.contextPct, v.contextTokens !== undefined && v.contextWindow ? `${kTokens(v.contextTokens)} / ${kTokens(v.contextWindow)}` : 'No reading yet')}
+        {gauge('5-hour limit', fiveHour?.pct, fiveHour?.resetsAt ? untilReset(fiveHour.resetsAt, now) : fiveHour ? '' : 'No reading yet')}
+        {gauge('Weekly limit', week?.pct, week?.resetsAt ? untilReset(week.resetsAt, now) : week ? '' : 'No reading yet')}
+        {pair('Session cost', money(v.costUsd))}
+
+        {divider}
+        {heading('Settings')}
+        {setting('voice', 'Voice', 'Speaks when a task ends or needs you', !v.isVoiceOff, toggleVoice)}
+        {setting('sound', 'Sound alerts', 'Chimes for prompts, loops and long tasks', !v.isMuted, toggleSound)}
+        {setting('calm', 'Calm motion', 'Slower, stiller animation', !!v.isCalm, toggleCalm)}
+
+        {divider}
+        {heading(
+          'Activity',
+          Select ? (
+            <Select key="filter" options={filterOptions} value={vw.filter} onSelect={(value: string) => setFilter(value)} />
+          ) : (
+            <Text size="footnote" dimColor>{filterName === 'ALL' ? 'Newest first' : filterName}</Text>
+          ),
+        )}
+        {rows.length === 0 && (
+          <Text size="footnote" dimColor>
+            {vw.filter === 'all' ? 'Nothing yet. Activity appears here as Claude works.' : 'Nothing matches this filter yet.'}
+          </Text>
+        )}
+        {rows.length > 0 && (
+          <Box flexDirection="column" gap="xs" minWidth={0}>
+            {rows.map((row: Row, index: number) => {
+              if (row.kind === 'task')
+                return (
+                  <Box flexDirection="column" marginTop={index === 0 ? 0 : 1} minWidth={0}>
+                    <Text size="caption" dimColor wrap="truncate">{`Task · ${clock(row.s.at)}`}</Text>
+                    {row.s.detail !== '' && <Text size="footnote" wrap="truncate">{row.s.detail}</Text>}
                   </Box>
-                  {row.s.detail !== '' && <Text size="footnote" italic dimColor wrap="truncate">{row.s.detail}</Text>}
-                </Box>
-              )
-            if (row.kind === 'summary') {
-              const sum = row.s.summary
+                )
+              if (row.kind === 'summary') {
+                const sum = row.s.summary
+                const files = sum?.files.length ?? 0
+                return (
+                  <Box flexDirection="row" columnGap={1} minWidth={0}>
+                    <Text size="footnote" color="success">✓</Text>
+                    <Box flexShrink={1} minWidth={0}>
+                      <Text size="footnote" dimColor wrap="truncate">
+                        {`Done${row.s.ms ? ` in ${took(row.s.ms)}` : ''} · ${sum?.steps ?? 0} ${sum?.steps === 1 ? 'step' : 'steps'} · ${files} ${files === 1 ? 'file' : 'files'} changed${sum?.errors ? ` · ${sum.errors} ${sum.errors === 1 ? 'error' : 'errors'}` : ''}`}
+                      </Text>
+                    </Box>
+                  </Box>
+                )
+              }
+              if (row.kind === 'compact')
+                return pair(
+                  `Memory compacted${row.s.tokens?.before !== undefined ? ` · ${kTokens(row.s.tokens.before)} → ${kTokens(row.s.tokens.after)}` : ''}`,
+                  clock(row.s.at),
+                )
+              const first = row.items[0]!
+              const line = headline(row.items)
+              const isOpen = vw.expanded.includes(row.key)
+              const st = status(row.items)
+              const failed = hasError(row.items)
               return (
                 <Box flexDirection="column" minWidth={0}>
-                  <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
-                    <Text size="caption" weight="bold" color={HOT}>✓ COMPLETE</Text>
-                    <Text size="caption" tabular dimColor>{row.s.ms ? took(row.s.ms) : clock(row.s.at)}</Text>
-                  </Box>
-                  <Text size="caption" dimColor wrap="truncate">
-                    {sum?.steps ?? 0} steps · {sum?.files.length ?? 0} files changed · {sum?.errors ?? 0} {sum?.errors === 1 ? 'error' : 'errors'}
-                  </Text>
-                  {sum && sum.files.length > 0 && <Text size="caption" mono color={PALE} wrap="truncate">{sum.files.join(', ')}</Text>}
-                </Box>
-              )
-            }
-            if (row.kind === 'compact')
-              return (
-                <Box flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
-                  <Text size="caption" weight="bold" color={HOT} wrap="truncate">
-                    MEMORY COMPACTED{row.s.tokens?.before !== undefined ? ` · ${kTokens(row.s.tokens.before)} → ${kTokens(row.s.tokens.after)}` : ''}
-                  </Text>
-                  <Text size="caption" tabular dimColor>{clock(row.s.at)}</Text>
-                </Box>
-              )
-            const first = row.items[0]!
-            const line = headline(row.items)
-            const isOpen = vw.expanded.includes(row.key)
-            const isNewest = index === rows.findIndex(r => r.kind === 'step')
-            const st = status(row.items)
-            const tagColor = hasError(row.items) ? RED : tagOf(first).color
-            return (
-              <Box flexDirection="column" minWidth={0}>
-                <Box flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
-                  <Button key={`r-${row.key}`} plain onPress={() => toggle(row.key)}>
-                    <Text size="caption" mono weight="semibold" color={isNewest ? '#1a0700' : tagColor} backgroundColor={isNewest ? tagColor : undefined}>
-                      {`${isOpen ? '▾' : '▸'} ${tagOf(first).name.padEnd(6)}`}
-                    </Text>
-                  </Button>
-                  <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                    <Box flexShrink={0}>
-                      <Text size="footnote" weight="medium" wrap="truncate">{line.verb}</Text>
-                    </Box>
-                    {line.detail !== '' && (
-                      <Box flexShrink={1} minWidth={0} overflow="hidden">
-                        <Text size="footnote" mono dimColor wrap="truncate">{line.detail}</Text>
+                  <Box flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+                    <Button key={`r-${row.key}`} plain dimColor onPress={() => toggle(row.key)}>
+                      <Text size="footnote">{isOpen ? '⌄' : '›'}</Text>
+                    </Button>
+                    <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                      <Box flexShrink={0}>
+                        <Text size="footnote" color={failed ? 'error' : undefined} wrap="truncate">{line.verb}</Text>
                       </Box>
-                    )}
-                  </Box>
-                  <Text size="caption" tabular color={st.color} dimColor={!st.color}>{st.text}</Text>
-                </Box>
-                {isOpen && (
-                  <Box flexDirection="column" paddingLeft={2} marginTop={1} marginBottom={1} minWidth={0}>
-                    {row.items.map(x => (
-                      <Box flexDirection="row" columnGap={1} minWidth={0}>
-                        <Text size="caption" tabular dimColor>{clock(x.at, true)}</Text>
-                        <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                          <Text size="caption" mono color={x.isError ? RED : PALE} wrap="truncate-middle">
-                            {x.detail || x.verb}
-                          </Text>
+                      {line.detail !== '' && (
+                        <Box flexShrink={1} minWidth={0} overflow="hidden">
+                          <Text size="footnote" mono dimColor wrap="truncate">{line.detail}</Text>
                         </Box>
-                        <Text size="caption" tabular color={x.isError ? RED : undefined} dimColor={!x.isError}>
-                          {x.isError ? 'failed' : x.isDone ? took(x.ms) : 'live'}
-                        </Text>
-                      </Box>
-                    ))}
+                      )}
+                    </Box>
+                    <Box flexShrink={0}>
+                      <Text size="caption" tabular color={st.color} dimColor={!st.color}>{st.text}</Text>
+                    </Box>
                   </Box>
-                )}
-              </Box>
-            )
-          })}
-        </Box>
+                  {isOpen && (
+                    <Box flexDirection="column" paddingLeft={2} marginTop="xs" marginBottom="xs" minWidth={0}>
+                      <Text size="caption" dimColor>{TAG[first.region].name.charAt(0) + TAG[first.region].name.slice(1).toLowerCase()}</Text>
+                      {row.items.map(x => (
+                        <Box flexDirection="row" columnGap={1} minWidth={0}>
+                          <Box flexShrink={0}>
+                            <Text size="caption" tabular dimColor>{clock(x.at, true)}</Text>
+                          </Box>
+                          <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                            <Text size="caption" mono color={x.isError ? 'error' : undefined} dimColor={!x.isError} wrap="truncate-middle">
+                              {x.detail || x.verb}
+                            </Text>
+                          </Box>
+                          <Box flexShrink={0}>
+                            <Text size="caption" tabular color={x.isError ? 'error' : undefined} dimColor={!x.isError}>
+                              {x.isError ? 'Failed' : x.isDone ? took(x.ms) : 'Running'}
+                            </Text>
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              )
+            })}
+          </Box>
+        )}
 
-        <Box flexDirection="column" borderStyle="round" borderColor={LINE} paddingX={1} paddingY={1} gap={1} minWidth={0}>
-          {section('HISTORY', <Text size="caption" tabular dimColor wrap="truncate">{num(lifetime.actions)} actions all time</Text>)}
-          <Box flexDirection="column" alignItems="center">
-            <Svg source={chartSvg(series)} alt={`Actions per day, last 14 days: ${series.map(d => d.t.actions).join(', ')}.`} />
-          </Box>
-          <Box flexDirection="column">
-            {tableRow('', 'TODAY', '7 DAYS', true)}
-            {tableRow('Actions', num(todayT.actions), num(last7.actions))}
-            {tableRow('Tasks', num(todayT.tasks), num(last7.tasks))}
-            {tableRow('Files edited', num(todayT.edits), num(last7.edits))}
-            {tableRow('Errors', num(todayT.errors), num(last7.errors))}
-            {tableRow('Time working', took(todayT.busyMs) || '0s', took(last7.busyMs) || '0s')}
-            {tableRow('Cost', money(todayT.costUsd), money(last7.costUsd))}
-          </Box>
+        {divider}
+        {heading('History', <Text size="footnote" tabular dimColor wrap="truncate">{`${num(lifetime.actions)} actions all time`}</Text>)}
+        <Svg source={chartSvg(series)} alt={`Actions per day, last 14 days: ${series.map(d => d.t.actions).join(', ')}.`} />
+        <Box flexDirection="column" gap="xs">
+          {tableRow('', 'Today', '7 days', true)}
+          {tableRow('Actions', num(todayT.actions), num(last7.actions))}
+          {tableRow('Tasks', num(todayT.tasks), num(last7.tasks))}
+          {tableRow('Files edited', num(todayT.edits), num(last7.edits))}
+          {tableRow('Errors', num(todayT.errors), num(last7.errors))}
+          {tableRow('Time working', took(todayT.busyMs) || '0s', took(last7.busyMs) || '0s')}
+          {tableRow('Cost', money(todayT.costUsd), money(last7.costUsd))}
         </Box>
       </Box>
     )
