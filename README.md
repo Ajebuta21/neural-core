@@ -30,7 +30,7 @@ The brain is the only thing in amber, and it floats on the panel with no backdro
   - A glow follows your mouse.
   - Hover over a lobe to see what it does.
   - Click a lobe to fire it.
-- **Settings.** Switch the voice, the alert sounds and calm (slower) motion on or off.
+- **Settings.** Switch the voice, the alert sounds and calm (slower) motion on or off, and pick the brain's voice from a dropdown: choosing one plays a sample, and **Play sample** replays it.
 
 It never calls the model, so it uses no extra tokens. Everything it reads stays on your machine.
 

@@ -137,3 +137,25 @@ test('switching back to a chat fetches fresh stats', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /85% used/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('a voice can be heard from the panel, then kept', async ($, on) => {
+  const said: { text: string; voice?: string }[] = []
+  on('command.register', () => ({ value: { command: 'brain' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('audio.speak', (_, e) => {
+    said.push({ text: e.text, voice: e.voice })
+    return { value: { via: 'system' as const } }
+  })
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'voice-play' })
+  expect(said[0]?.voice).toBe('Daniel')
+  await ui.select({ key: 'voice-pick', value: 'Zarvox' })
+  expect(said[1]).toEqual({ text: expect.stringMatching(/Zarvox/), voice: 'Zarvox' })
+  expect((await ui.find({ type: 'Select', key: 'voice-pick' }))?.props.value).toBe('Zarvox')
+  await ui.press({ key: 'voice-play' })
+  expect(said[2]?.voice).toBe('Zarvox')
+  await ui.unmount()
+})

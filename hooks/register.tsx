@@ -223,9 +223,31 @@ async function announce($: EngineInterface, sound: 'done' | 'ping' | 'alert' | u
   const v = await read($, vitals)
   if (sound && !v.isMuted) await $.audio.play({ asset: `sounds/${sound}.wav` }).catch(() => undefined)
   if (!words || v.isVoiceOff) return
+  await speak($, words, v.voice ?? VOICES[0]!.name)
+}
+
+// The voices every Mac ships with, the default first. One that isn't
+// installed falls back to the system voice.
+const VOICES = [
+  { name: 'Daniel', what: 'British, calm' },
+  { name: 'Samantha', what: 'American' },
+  { name: 'Karen', what: 'Australian' },
+  { name: 'Moira', what: 'Irish' },
+  { name: 'Tessa', what: 'South African' },
+  { name: 'Rishi', what: 'Indian' },
+  { name: 'Ralph', what: 'deep' },
+  { name: 'Albert', what: 'gravelly' },
+  { name: 'Fred', what: 'classic robot' },
+  { name: 'Zarvox', what: 'robotic' },
+  { name: 'Trinoids', what: 'alien' },
+  { name: 'Whisper', what: 'whisper' },
+]
+
+// Say the words in `voice`, showing them under the brain while it talks.
+async function speak($: EngineInterface, words: string, voice: string) {
   const at = Date.now()
   await update($, vitals, x => ({ ...x, speaking: { text: words, at } }))
-  await $.audio.speak(words).catch(() => undefined)
+  await $.audio.speak(words, { voice }).catch(() => $.audio.speak(words).catch(() => undefined))
   await patchVitals($, x => (x.speaking?.at === at ? { ...x, speaking: undefined } : x))
 }
 
@@ -564,6 +586,13 @@ export const register: Register = on => {
     const money = (n: number | undefined) => (n === undefined ? '--' : `$${n.toFixed(2)}`)
     const hasError = (items: Spark[]) => items.some(x => x.isError)
     const toggleVoice = () => update($, vitals, x => ({ ...x, isVoiceOff: !x.isVoiceOff, speaking: undefined }))
+    const voice = v.voice ?? VOICES[0]!.name
+    const sample = (name: string) => speak($, `Hi, I'm ${name}. Done in 42 seconds. 5 steps, 2 files changed.`, name)
+    // Picking a voice plays it at once, so you hear it before you keep it.
+    const pickVoice = async (name: string) => {
+      await update($, vitals, x => ({ ...x, voice: name }))
+      void sample(name)
+    }
     // Thin rules and meters, drawn in a mid grey that reads on light and dark.
     const divider = <Svg source={RULE} alt="" />
     const heading = (title: string, right?: RenderChildren) => (
@@ -669,6 +698,19 @@ export const register: Register = on => {
         {divider}
         {heading('Settings')}
         {setting('voice', 'Voice', 'Speaks when a task ends or needs you', !v.isVoiceOff, toggleVoice)}
+        {Select && (
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Select
+                key="voice-pick"
+                options={VOICES.map(x => ({ value: x.name, label: `${x.name} · ${x.what}` }))}
+                value={voice}
+                onSelect={(name: string) => pickVoice(name)}
+              />
+            </Box>
+            <Button key="voice-play" label="Play sample" onPress={() => sample(voice)} />
+          </Box>
+        )}
         {setting('sound', 'Sound alerts', 'Chimes for prompts, loops and long tasks', !v.isMuted, toggleSound)}
         {setting('calm', 'Calm motion', 'Slower, stiller animation', !!v.isCalm, toggleCalm)}
 

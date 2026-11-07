@@ -47,6 +47,8 @@ export type Vitals = {
   isCalm?: boolean
   // The spoken updates, on unless switched off, and the line being spoken now.
   isVoiceOff?: boolean
+  // The system voice the brain speaks with, by name; absent, the default (VOICES[0]).
+  voice?: string
   speaking?: { text: string; at: number }
   // When the panel last opened, for the boot sequence.
   bootAt?: number
