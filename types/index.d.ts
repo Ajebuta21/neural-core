@@ -49,6 +49,9 @@ export type Vitals = {
   isVoiceOff?: boolean
   // The system voice the brain speaks with, by name; absent, the default (VOICES[0]).
   voice?: string
+  // The good English voices this Mac has, found at start: Daniel, Samantha and
+  // any Enhanced or Premium voice downloaded in System Settings.
+  voices?: { name: string; what: string }[]
   speaking?: { text: string; at: number }
   // When the panel last opened, for the boot sequence.
   bootAt?: number

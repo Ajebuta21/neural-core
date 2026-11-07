@@ -40,8 +40,8 @@ const history = atom({ plugin: 'neural-core', key: 'history' } as const, { days:
   shape: 'history-1',
 })
 
-// A task this long gets a "done" chime when it ends.
-const LONG_TASK_MS = 20000
+// A task this long gets a "done" chime and a spoken line when it ends.
+const LONG_TASK_MS = 60000
 // A permission prompt still open after this long gets a toast and a ding.
 const WAIT_ALERT_MS = 1500
 const MEMORY_WARN_PCT = 80
@@ -217,31 +217,58 @@ async function patchVitals($: EngineInterface, change: (v: Vitals) => Vitals): P
   return update($, vitals, change)
 }
 
+// The brain speaks only for what matters: Claude needs you, a loop, memory
+// filling up, a long task done. The same line is never repeated within a
+// minute, and nothing but an approval request follows another within 10 seconds.
+const QUIET_MS = 10000
+const REPEAT_MS = 60000
+let lastSaid = { text: '', at: 0 }
+
 // A chime, then the brain says the words: each only while switched on. Run
 // without awaiting it, so no hook waits on the speakers.
-async function announce($: EngineInterface, sound: 'done' | 'ping' | 'alert' | undefined, words?: string) {
+async function announce($: EngineInterface, sound: 'done' | 'ping' | 'alert' | undefined, words?: string, isUrgent = false) {
   const v = await read($, vitals)
   if (sound && !v.isMuted) await $.audio.play({ asset: `sounds/${sound}.wav` }).catch(() => undefined)
   if (!words || v.isVoiceOff) return
-  await speak($, words, v.voice ?? VOICES[0]!.name)
+  const now = Date.now()
+  if (words === lastSaid.text && now - lastSaid.at < REPEAT_MS) return
+  if (!isUrgent && now - lastSaid.at < QUIET_MS) return
+  lastSaid = { text: words, at: now }
+  await speak($, words, voiceOf(v))
 }
 
-// The voices every Mac ships with, the default first. One that isn't
-// installed falls back to the system voice.
-const VOICES = [
-  { name: 'Daniel', what: 'British, calm' },
+// Used when this Mac's voices can't be listed: both ship with every Mac.
+const BUILT_IN = [
+  { name: 'Daniel', what: 'British' },
   { name: 'Samantha', what: 'American' },
-  { name: 'Karen', what: 'Australian' },
-  { name: 'Moira', what: 'Irish' },
-  { name: 'Tessa', what: 'South African' },
-  { name: 'Rishi', what: 'Indian' },
-  { name: 'Ralph', what: 'deep' },
-  { name: 'Albert', what: 'gravelly' },
-  { name: 'Fred', what: 'classic robot' },
-  { name: 'Zarvox', what: 'robotic' },
-  { name: 'Trinoids', what: 'alien' },
-  { name: 'Whisper', what: 'whisper' },
 ]
+const ACCENT: Record<string, string> = {
+  en_US: 'American', en_GB: 'British', en_AU: 'Australian', en_IE: 'Irish', en_IN: 'Indian', en_ZA: 'South African', en_SC: 'Scottish', en_NZ: 'New Zealand',
+}
+const isPremium = (name: string) => /\((Enhanced|Premium)\)/.test(name)
+
+// The chosen voice, else the best one installed: a Premium or Enhanced voice
+// before plain Daniel.
+const voiceOf = (v: Vitals) =>
+  v.voice ?? (v.voices ?? []).find(x => /Premium/.test(x.name))?.name ?? (v.voices ?? []).find(x => isPremium(x.name))?.name ?? 'Daniel'
+
+// List this Mac's good English voices: Daniel, Samantha, and every Enhanced or
+// Premium voice (the natural-sounding ones you download in System Settings).
+async function findVoices($: EngineInterface) {
+  try {
+    const { stdout } = await $.process.run(['say', '-v', '?'], { timeoutMs: 5000 })
+    const found = stdout
+      .split('\n')
+      .map(line => line.match(/^(.+?)\s+(en_[A-Z]{2})\s+#/))
+      .filter((m): m is RegExpMatchArray => !!m)
+      .filter(m => isPremium(m[1]!) || /^(Daniel|Samantha)$/.test(m[1]!))
+      .map(m => ({ name: m[1]!.trim(), what: ACCENT[m[2]!] ?? m[2]! }))
+      .sort((a, b) => Number(isPremium(b.name)) - Number(isPremium(a.name)))
+    if (found.length > 0) await patchVitals($, v => ({ ...v, voices: found }))
+  } catch {
+    // Not a Mac, or `say` is missing: the built-in pair stands.
+  }
+}
 
 // Say the words in `voice`, showing them under the brain while it talks.
 async function speak($: EngineInterface, words: string, voice: string) {
@@ -293,6 +320,7 @@ export const register: Register = on => {
       sessionKey: v.sessionKey ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     }))
     void $.ui.open({ id: PANE, title: TITLE })
+    void findVoices($)
     if (v0.sessionKey) await refresh($)
 
     return next(e)
@@ -311,7 +339,7 @@ export const register: Register = on => {
     const after = await patchVitals($, v => withUsage(v, e))
     if ((before.contextPct ?? 0) < MEMORY_WARN_PCT && (after.contextPct ?? 0) >= MEMORY_WARN_PCT) {
       $.ui.toast(`Memory is ${after.contextPct}% full. Consider /compact or a fresh session soon.`)
-      void announce($, 'alert', `Memory is ${Math.round(after.contextPct ?? 0)} percent full.`)
+      void announce($, 'alert', `Memory is ${Math.round(after.contextPct ?? 0)} percent full. Consider compacting.`)
     }
 
     return next(e)
@@ -329,7 +357,7 @@ export const register: Register = on => {
         void (async () => {
           if ((await read($, vitals)).waiting?.id !== id) return
           $.ui.toast(`Claude needs your OK: ${what}`)
-          void announce($, 'ping', `I need your OK to continue. ${what}.`)
+          void announce($, 'ping', 'Claude needs your approval.', true)
         })()
       })
     }
@@ -368,8 +396,6 @@ export const register: Register = on => {
   on('command.run', { command: 'brain' }, async $ => {
     await update($, vitals, v => ({ ...v, bootAt: Date.now() }))
     await $.ui.open({ id: PANE, title: TITLE })
-
-    void announce($, undefined, 'Neural core online.')
 
     return { text: 'Neural Core online.' }
   })
@@ -430,7 +456,7 @@ export const register: Register = on => {
     if (loop && (await read($, vitals)).loopWarned !== loop) {
       await update($, vitals, v => ({ ...v, loopWarned: loop }))
       $.ui.toast(`Possible loop: Claude keeps repeating "${loop}". You may want to step in.`)
-      void announce($, 'alert', `I may be stuck in a loop. I keep repeating: ${loop.replace(/ ×\d+$/, '')}.`)
+      void announce($, 'alert', 'Claude may be stuck in a loop. You may want to step in.')
     }
 
     return ran
@@ -453,16 +479,10 @@ export const register: Register = on => {
       return { ...b, mode: 'idle' as Mode, feed: [...b.feed, ...card].slice(-FEED_SIZE) }
     })
     if (ms >= LONG_TASK_MS) $.ui.toast(`Done in ${took(ms)}.`)
-    if (summary) {
-      const files = summary.files.length
-      const words = [
-        `Done in ${spoken(ms)}. `,
-        `${summary.steps} step${summary.steps === 1 ? '' : 's'}`,
-        files > 0 ? `, ${files} file${files === 1 ? '' : 's'} changed` : '',
-        summary.errors > 0 ? `, ${summary.errors} error${summary.errors === 1 ? '' : 's'}` : '',
-        '.',
-      ].join('')
-      void announce($, ms >= LONG_TASK_MS ? 'done' : undefined, words.replace(/^Done in 0 seconds\. /, 'Done. '))
+    // Only a long task is announced: you have likely looked away by then.
+    if (summary && ms >= LONG_TASK_MS) {
+      const errors = summary.errors > 0 ? `, with ${summary.errors} error${summary.errors === 1 ? '' : 's'}` : ''
+      void announce($, 'done', `Task finished in ${spoken(ms)}${errors}.`)
     }
     await saveTotals($)
 
@@ -586,8 +606,13 @@ export const register: Register = on => {
     const money = (n: number | undefined) => (n === undefined ? '--' : `$${n.toFixed(2)}`)
     const hasError = (items: Spark[]) => items.some(x => x.isError)
     const toggleVoice = () => update($, vitals, x => ({ ...x, isVoiceOff: !x.isVoiceOff, speaking: undefined }))
-    const voice = v.voice ?? VOICES[0]!.name
-    const sample = (name: string) => speak($, `Hi, I'm ${name}. Done in 42 seconds. 5 steps, 2 files changed.`, name)
+    const voice = voiceOf(v)
+    const voices = v.voices ?? BUILT_IN
+    const options = (voices.some(x => x.name === voice) ? voices : [{ name: voice, what: 'chosen' }, ...voices]).map(x => ({
+      value: x.name,
+      label: `${x.name.replace(/ \((Enhanced|Premium)\)/, '')} · ${x.what}${isPremium(x.name) ? ', natural' : ''}`,
+    }))
+    const sample = (name: string) => speak($, `Hi, I'm ${name.replace(/ \(.*\)/, '')}. Task finished in 2 minutes.`, name)
     // Picking a voice plays it at once, so you hear it before you keep it.
     const pickVoice = async (name: string) => {
       await update($, vitals, x => ({ ...x, voice: name }))
@@ -622,13 +647,19 @@ export const register: Register = on => {
         <Svg source={meter(pct)} alt={`${label}: ${pct === undefined ? 'no reading' : `${Math.round(pct)}% used`}`} />
       </Box>
     )
+    // A switch: a pill-shaped track with the knob at the right end when on.
+    const switchFor = (key: string, label: string, isOn: boolean, onPress: () => unknown) => (
+      <Button key={key} plain label={`${label}: ${isOn ? 'on' : 'off'}`} onPress={onPress}>
+        <Text size="footnote" color="#ffffff" backgroundColor={isOn ? '#3b82f6' : '#6b6b6b'}>{isOn ? '   ● ' : ' ●   '}</Text>
+      </Button>
+    )
     const setting = (key: string, label: string, hint: string, isOn: boolean, onPress: () => unknown) => (
       <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
         <Box flexDirection="column" flexShrink={1} minWidth={0}>
           <Text size="footnote" wrap="truncate">{label}</Text>
           <Text size="caption" dimColor wrap="truncate">{hint}</Text>
         </Box>
-        <Button key={key} label={isOn ? 'On' : 'Off'} dimColor={!isOn} onPress={onPress} />
+        {switchFor(key, label, isOn, onPress)}
       </Box>
     )
     const notice = (title: string, color: string, lines: string[]) => (
@@ -697,19 +728,24 @@ export const register: Register = on => {
 
         {divider}
         {heading('Settings')}
-        {setting('voice', 'Voice', 'Speaks when a task ends or needs you', !v.isVoiceOff, toggleVoice)}
+        {setting('voice', 'Voice', 'Speaks when Claude needs you or a long task ends', !v.isVoiceOff, toggleVoice)}
         {Select && (
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap={1} minWidth={0}>
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               <Select
                 key="voice-pick"
-                options={VOICES.map(x => ({ value: x.name, label: `${x.name} · ${x.what}` }))}
+                options={options}
                 value={voice}
                 onSelect={(name: string) => pickVoice(name)}
               />
             </Box>
             <Button key="voice-play" label="Play sample" onPress={() => sample(voice)} />
           </Box>
+        )}
+        {Select && !voices.some(x => isPremium(x.name)) && (
+          <Text size="caption" dimColor>
+            For a natural voice, download one in System Settings › Accessibility › Spoken Content › System voice › Manage Voices (pick an English voice marked Premium). It appears here in your next session.
+          </Text>
         )}
         {setting('sound', 'Sound alerts', 'Chimes for prompts, loops and long tasks', !v.isMuted, toggleSound)}
         {setting('calm', 'Calm motion', 'Slower, stiller animation', !!v.isCalm, toggleCalm)}
