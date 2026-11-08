@@ -15,6 +15,11 @@ export type Spark = {
   kind?: 'task' | 'summary' | 'compact'
   summary?: { steps: number; files: string[]; errors: number }
   tokens?: { before?: number; after?: number }
+  // The exact call (tool and input) and what it answered, as short hashes, for
+  // telling a real loop from progress; and the subagent loop it ran in.
+  sig?: string
+  out?: string
+  agent?: string
 }
 // What the stream shows: a filter ('all', 'errors' or a region) and the rows
 // opened to show their detail.
@@ -38,8 +43,8 @@ export type Vitals = {
   contextWindow?: number
   limits: Limit[]
   costUsd?: number
-  // A permission prompt waiting on the person.
-  waiting?: { id: string; what: string; since: number }
+  // A permission dialog open for the person, and which agent loop it holds up.
+  waiting?: { id: string; what: string; since: number; agent?: string }
   turnStartedAt?: number
   // The repeated action a loop warning was last raised for, so it fires once.
   loopWarned?: string

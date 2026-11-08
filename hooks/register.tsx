@@ -42,8 +42,9 @@ const history = atom({ plugin: 'neural-core', key: 'history' } as const, { days:
 
 // A task this long gets a "done" chime and a spoken line when it ends.
 const LONG_TASK_MS = 60000
-// A permission prompt still open after this long gets a toast and a ding.
-const WAIT_ALERT_MS = 1500
+// A permission dialog still open after this long gets a toast and the voice:
+// long enough that someone at the screen has already answered it.
+const WAIT_ALERT_MS = 6000
 const MEMORY_WARN_PCT = 80
 
 // Only the brain is drawn in amber; the panel around it takes the theme's own
@@ -148,24 +149,39 @@ function withUsage(v: Vitals, u: Usage): Vitals {
   }
 }
 
-// A loop in the current task: the latest action repeated 3 times in the last
-// 6 with no edit between (re-running tests after a fix is progress, not a
-// loop), or 3 failures in a row. Answers the repeated action in words.
+// A short, stable hash of a text, for comparing calls and results.
+function hash(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+// A loop in the current task, in the main loop: the exact same call (same
+// tool, same input) three times in the last six, answered the same way each
+// time, with no other successful edit between. A file read in chunks, a
+// command whose output changes (a poll, tests rerun after a fix) and different
+// errors while debugging are all progress, not a loop. Answers it in words.
 function loopIn(feed: Spark[]): string | undefined {
   const start = feed.map(isTask).lastIndexOf(true) + 1
-  const steps = feed.slice(start).filter(s => s.region !== 'core' && s.isDone)
-  const tail = steps.slice(-3)
-  if (tail.length === 3 && tail.every(s => s.isError)) return `${tail[2]!.verb} ${tail[2]!.detail} (3 failures in a row)`.trim()
+  const steps = feed.slice(start).filter(s => s.region !== 'core' && s.isDone && !s.agent)
   const recent = steps.slice(-6)
   const latest = recent[recent.length - 1]
-  if (!latest || latest.region === 'build') return undefined
-  const sig = (s: Spark) => `${s.verb} ${s.detail}`.trim()
-  const same = recent.filter(s => sig(s) === sig(latest))
-  if (same.length < 3) return undefined
+  if (!latest?.sig) return undefined
+  const same = recent.filter(s => s.sig === latest.sig)
+  if (same.length < 3 || !same.every(s => s.out === latest.out)) return undefined
   const between = recent.slice(recent.indexOf(same[0]!))
-  if (between.some(s => s.region === 'build' && !s.isError)) return undefined
-  return `${sig(latest)} ×${same.length}`
+  if (between.some(s => s.region === 'build' && !s.isError && s.sig !== latest.sig)) return undefined
+  const what = `${latest.verb} ${latest.detail}`.trim()
+  return same.every(s => s.isError) ? `${what} (failed ${same.length} times)` : `${what} ×${same.length}`
 }
+
+// Calls running now, by id: which tool, in which agent loop, since when. A
+// permission dialog names its tool but not its call, so it is matched here.
+const running = new Map<string, { tool: string; agent?: string; at: number }>()
+
+// Close the waiting state when Claude has moved past it.
+const clearWaiting = ($: EngineInterface, isPast: (w: NonNullable<Vitals['waiting']>) => boolean) =>
+  patchVitals($, v => (v.waiting && isPast(v.waiting) ? { ...v, waiting: undefined } : v))
 
 // Save this session's running totals to the store, under its own key.
 async function saveTotals($: EngineInterface) {
@@ -227,6 +243,14 @@ let lastSaid = { text: '', at: 0 }
 // A chime, then the brain says the words: each only while switched on. Run
 // without awaiting it, so no hook waits on the speakers.
 async function announce($: EngineInterface, sound: 'done' | 'ping' | 'alert' | undefined, words?: string, isUrgent = false) {
+  try {
+    await say($, sound, words, isUrgent)
+  } catch {
+    // The session ended or the speakers failed: a missed line, nothing more.
+  }
+}
+
+async function say($: EngineInterface, sound: 'done' | 'ping' | 'alert' | undefined, words: string | undefined, isUrgent: boolean) {
   const v = await read($, vitals)
   if (sound && !v.isMuted) await $.audio.play({ asset: `sounds/${sound}.wav` }).catch(() => undefined)
   if (!words || v.isVoiceOff) return
@@ -422,24 +446,44 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A permission prompt put to the person: Claude is waiting on you.
-  on('tool.check', async ($, e, next) => {
-    const verdict = await next(e)
-    const id = e.tool_use_id
-    if (verdict.decision === 'ask' && e.approver === 'person' && id) {
-      const { verb, detail } = describe(e.tool, (e.input ?? {}) as Record<string, unknown>)
-      const what = oneLine(`${verb} ${detail}`, 70)
-      await update($, vitals, v => ({ ...v, waiting: { id, what, since: Date.now() } }))
-      $.clock.after(WAIT_ALERT_MS, () => {
-        void (async () => {
-          if ((await read($, vitals)).waiting?.id !== id) return
-          $.ui.toast(`Claude needs your OK: ${what}`)
-          void announce($, 'ping', 'Claude needs your approval.', true)
-        })()
-      })
-    }
+  // A permission dialog shown to you: the one time Claude is really waiting on
+  // you. A tool.check "ask" is not that: in auto mode the classifier answers
+  // most asks without you, and allow rules answer others. You're reminded only
+  // if the dialog is still open WAIT_ALERT_MS later.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const agent = e.agent_id
+    let id: string | undefined
+    for (const [callId, call] of running) if (call.tool === e.tool_name && call.agent === agent) id = callId
+    const callId = id ?? `dialog-${Date.now()}`
+    const { verb, detail } = describe(e.tool_name, (e.tool_input ?? {}) as Record<string, unknown>)
+    const what = oneLine(`${verb} ${detail}`, 70)
+    await update($, vitals, v => ({ ...v, waiting: { id: callId, what, since: Date.now(), agent } }))
+    $.clock.after(WAIT_ALERT_MS, () => {
+      void (async () => {
+        if ((await read($, vitals)).waiting?.id !== callId) return
+        $.ui.toast(`Claude needs your OK: ${what}`)
+        await announce($, 'ping', 'Claude needs your approval.', true)
+      })().catch(() => undefined)
+    })
 
-    return verdict
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // A new model request in the loop a dialog held up: it was answered.
+  on('turn.step', async function* ($, e, next) {
+    await clearWaiting($, w => w.agent === e.agentId).catch(() => undefined)
+
+    return yield* next(e)
+  })
+
+  // The run-in-background hint shows only once a command is running, so its
+  // dialog was answered.
+  // Drawing is pure, so the write waits for a timer of its own.
+  on('ui.render', { component: 'ToolProgress' }, ($, e, next) => {
+    const id = (e.props as { tool_use_id?: string }).tool_use_id
+    if (id) $.clock.after(0, () => void clearWaiting($, w => w.id === id).catch(() => undefined))
+
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
@@ -509,6 +553,10 @@ export const register: Register = on => {
     const { verb, detail } = describe(e.tool, e as unknown as Record<string, unknown>)
     const id = e.tool_use_id
     const started = Date.now()
+    const agent = (e as { agentId?: string }).agentId
+    const { tool_use_id: _id, agentId: _agent, ...input } = e as unknown as Record<string, unknown>
+    const sig = hash(JSON.stringify(input))
+    running.set(id, { tool: e.tool, agent, at: started })
     await update($, brain, b => ({
       ...b,
       mode: 'acting' as Mode,
@@ -516,19 +564,27 @@ export const register: Register = on => {
       counts: { ...b.counts, [region]: b.counts[region] + 1 },
       feed: [
         ...b.feed,
-        { id, region, verb, detail: oneLine(detail, 300), isError: false, isDone: false, at: started },
+        { id, region, verb, detail: oneLine(detail, 300), isError: false, isDone: false, at: started, sig, ...(agent ? { agent } : {}) },
       ].slice(-FEED_SIZE),
     }))
-    await patchVitals($, v => (v.waiting && v.waiting.id !== id ? { ...v, waiting: undefined } : v))
-    const ran = await next(e)
-    await patchVitals($, v => (v.waiting?.id === id ? { ...v, waiting: undefined } : v))
+    // Claude starting another call in the same loop after a dialog opened means
+    // the dialog was answered (calls wait behind it).
+    await clearWaiting($, w => w.agent === agent && started - w.since > 500)
+    let ran: Awaited<ReturnType<typeof next>>
+    try {
+      ran = await next(e)
+    } finally {
+      running.delete(id)
+      await clearWaiting($, w => w.id === id)
+    }
     const failed = 'deny' in ran && ran.deny !== undefined ? true : ran.isError === true
+    const out = hash(('deny' in ran && ran.deny) || (ran as { text?: string }).text || '')
     const after = await update($, brain, b => ({
       ...b,
       mode: 'thinking' as Mode,
       errors: b.errors + (failed ? 1 : 0),
       feed: b.feed.map(s =>
-        s.id === id ? { ...s, isDone: true, isError: failed, ms: Date.now() - started, at: failed ? Date.now() : s.at } : s,
+        s.id === id ? { ...s, isDone: true, isError: failed, ms: Date.now() - started, at: failed ? Date.now() : s.at, out } : s,
       ),
     }))
     const loop = loopIn(after.feed)
@@ -574,7 +630,11 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    if (Date.now() - refreshedAt > REFRESH_MS) void refresh($)
+    // Drawing is pure: the refresh writes from a timer of its own.
+    if (Date.now() - refreshedAt > REFRESH_MS) {
+      refreshedAt = Date.now()
+      $.clock.after(0, () => void refresh($).catch(() => undefined))
+    }
     const b = await read($, brain)
     const v = await read($, vitals)
     const loop = loopIn(b.feed)

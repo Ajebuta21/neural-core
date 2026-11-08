@@ -15,8 +15,8 @@ The brain is the only thing in amber, and it floats on the panel with no backdro
   - **LINK**: other tools
 - **Usage meters.** Memory (context window) fill, your 5-hour limit with a reset countdown, your weekly limit and the session's cost. Each turns yellow at 70% and red at 90%. They refresh when you switch back to a chat, since your limits are shared across chats.
 - **A voice.** The brain speaks with a Mac voice, and a waveform pulses under it while it talks. It says only:
-  - "Claude needs your approval." when a permission prompt is waiting.
-  - "Claude may be stuck in a loop." when it repeats itself.
+  - "Claude needs your approval." when a permission dialog has been open for 6 seconds. Asks that auto mode or your allow rules settle on their own never trigger it, and it stops as soon as you answer.
+  - "Claude may be stuck in a loop." when it makes the exact same call three times and gets the exact same result each time. Reading a big file in chunks, polling a command whose output changes, or rerunning tests after a fix is progress, not a loop.
   - "Memory is 80 percent full." once memory fills up.
   - "Task finished in 3 minutes." when a task that took over a minute ends.
 
